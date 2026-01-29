@@ -4,9 +4,11 @@
 //! Different agent types (Claude Code, Codex, etc.) have their own parser implementations
 //! that convert their native formats into the common [`Session`] type.
 
+mod claude;
 mod error;
 mod types;
 
+pub use claude::ClaudeParser;
 pub use error::ParseError;
 pub use types::{Block, Session};
 
