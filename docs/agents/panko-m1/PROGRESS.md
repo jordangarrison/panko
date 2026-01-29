@@ -10,17 +10,18 @@
 | ID | Title | Status | Notes |
 |----|-------|--------|-------|
 | 1 | Project scaffolding and CLI structure | ✅ Complete | |
-| 2 | Parser trait and unified types | ⬜ Not Started | |
-| 3 | Claude Code JSONL parser | ⬜ Not Started | |
-| 4 | Embedded web assets and templates | ⬜ Not Started | |
-| 5 | Local web server with view command | ⬜ Not Started | |
-| 6 | Tunnel provider trait and detection | ⬜ Not Started | |
-| 7 | Cloudflare quick tunnel implementation | ⬜ Not Started | |
-| 8 | Share command with tunnel and clipboard | ⬜ Not Started | |
-| 9 | ngrok tunnel implementation | ⬜ Not Started | |
-| 10 | Tailscale serve implementation | ⬜ Not Started | |
-| 11 | Configuration file support | ⬜ Not Started | |
-| 12 | Keyboard navigation in viewer | ⬜ Not Started | |
+| 2 | Parser trait and unified types | ✅ Complete | |
+| 3 | Claude Code JSONL parser | ✅ Complete | |
+| 4 | Embedded web assets and templates | ✅ Complete | |
+| 5 | Local web server with view command | ✅ Complete | |
+| 6 | Tunnel provider trait and detection | ✅ Complete | |
+| 7 | Cloudflare quick tunnel implementation | ✅ Complete | |
+| 8 | Share command with tunnel and clipboard | ✅ Complete | |
+| 9 | ngrok tunnel implementation | ✅ Complete | |
+| 10 | Tailscale serve implementation | ✅ Complete | |
+| 11 | Configuration file support | ✅ Complete | |
+| 12 | Keyboard navigation in viewer | ✅ Complete | |
+| 13 | Fix tool_result content polymorphic type | ✅ Complete | Bug fix |
 
 ## Legend
 
@@ -46,6 +47,32 @@
 - `cargo test` - PASS (0 tests, no failures)
 - `cargo clippy` - PASS (no warnings)
 - `cargo fmt --check` - PASS
+
+### 2026-01-29 (continued)
+
+**Story 13: Fix tool_result content polymorphic type** - COMPLETE
+
+**Problem**: Parser was failing with ~40% of real Claude session files due to `data did not match any variant of untagged enum MessageContent` error.
+
+**Root Cause**: In `src/parser/claude.rs`, `ContentBlock.content` was typed as `Option<String>`, but real Claude session files have `content` that can be either:
+1. A `String`: `"content": "result text"`
+2. An `Array`: `"content": [{"type": "text", "text": "..."}]`
+
+**Solution**:
+- Added `ToolResultContent` enum (untagged) that handles both String and Array variants
+- Added `ToolResultContentBlock` struct for array elements
+- Implemented `Display` trait for `ToolResultContent` to convert to string
+- Updated `ContentBlock` to use `Option<ToolResultContent>`
+- Fixed character boundary panic in `extract_file_edit` when truncating multi-byte characters
+
+**Validation Results:**
+- `cargo build` - PASS
+- `cargo test` - PASS (145 tests, 0 failures, 4 new tests added)
+- `cargo clippy` - PASS (no warnings)
+- `cargo fmt --check` - PASS
+- Batch test: 41 success, 8 failures (all failures are empty sessions - expected)
+- Previously failing file now parses: 456cc625-e22a-45e3-80a6-160928059ef3.jsonl (29 blocks)
+- Previously panicking file now parses: 13040d97-de66-47ed-8ec2-6b91e0a165f6.jsonl (149 blocks)
 
 ---
 

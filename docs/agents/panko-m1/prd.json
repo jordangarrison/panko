@@ -187,6 +187,21 @@
         "Escape closes any open overlays"
       ],
       "depends_on": ["5"]
+    },
+    {
+      "id": "13",
+      "title": "Fix tool_result content polymorphic type",
+      "description": "Handle tool_result content that can be either string or array of text blocks",
+      "priority": 13,
+      "passes": true,
+      "acceptance_criteria": [
+        "ToolResultContent enum handles both String and Array variants",
+        "Parser extracts text from array-style tool results",
+        "All existing unit tests pass",
+        "New unit test for array-style tool_result content",
+        "Fix character boundary panic in extract_file_edit truncation"
+      ],
+      "depends_on": ["3"]
     }
   ]
 }

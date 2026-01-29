@@ -105,7 +105,7 @@ impl SessionParser for ClaudeParser {
                                         let output = block
                                             .content
                                             .as_ref()
-                                            .map(|c| Value::String(c.clone()));
+                                            .map(|c| Value::String(c.to_string()));
                                         blocks.push(Block::tool_call(
                                             pending.name,
                                             pending.input,
@@ -230,7 +230,42 @@ struct ContentBlock {
     input: Option<Value>,
     id: Option<String>,
     tool_use_id: Option<String>,
-    content: Option<String>,
+    content: Option<ToolResultContent>,
+}
+
+/// Tool result content can be a string or an array of content blocks.
+/// This handles the polymorphic nature of tool_result content in Claude sessions.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ToolResultContent {
+    String(String),
+    Array(Vec<ToolResultContentBlock>),
+}
+
+/// A content block within a tool result array.
+#[derive(Debug, Deserialize)]
+struct ToolResultContentBlock {
+    #[serde(rename = "type")]
+    #[allow(dead_code)]
+    block_type: Option<String>,
+    text: Option<String>,
+}
+
+impl std::fmt::Display for ToolResultContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ToolResultContent::String(s) => write!(f, "{}", s),
+            ToolResultContent::Array(blocks) => {
+                let text = blocks
+                    .iter()
+                    .filter_map(|b| b.text.as_ref())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                write!(f, "{}", text)
+            }
+        }
+    }
 }
 
 /// Extract user content from a message.
@@ -336,8 +371,15 @@ fn extract_file_edit(tool_name: &str, input: &Value, timestamp: DateTime<Utc>) -
             let path = input.get("file_path")?.as_str()?;
             let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
             // For writes, show the full content as an addition
+            // Use char_indices to safely truncate at character boundaries
             let preview = if content.len() > 500 {
-                format!("{}...\n[content truncated]", &content[..500])
+                let truncate_at = content
+                    .char_indices()
+                    .take_while(|(i, _)| *i < 500)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0);
+                format!("{}...\n[content truncated]", &content[..truncate_at])
             } else {
                 content.to_string()
             };
@@ -606,5 +648,93 @@ mod tests {
             .collect();
         assert!(tool_names.contains(&"Glob"));
         assert!(tool_names.contains(&"Grep"));
+    }
+
+    #[test]
+    fn test_parse_tool_result_with_array_content() {
+        // Test that tool results with array-style content are parsed correctly
+        // This is the polymorphic content case that previously caused parsing failures
+        let content = r#"{"type":"user","sessionId":"test-123","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Read files"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"/src/main.rs"}}]}}
+{"type":"user","timestamp":"2024-01-15T10:30:02Z","message":{"role":"user","content":[{"tool_use_id":"tool-1","type":"tool_result","content":[{"type":"text","text":"fn main() {\n    println!(\"Hello\");\n}"}]}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        // Should have user prompt and tool call
+        assert_eq!(session.blocks.len(), 2);
+
+        match &session.blocks[1] {
+            Block::ToolCall { name, output, .. } => {
+                assert_eq!(name, "Read");
+                // The array content should be extracted as a string
+                let output_str = output.as_ref().unwrap().as_str().unwrap();
+                assert!(output_str.contains("fn main()"));
+                assert!(output_str.contains("println!"));
+            }
+            _ => panic!("Expected ToolCall block"),
+        }
+    }
+
+    #[test]
+    fn test_parse_tool_result_with_multiple_text_blocks() {
+        // Test array content with multiple text blocks joined by newline
+        let content = r#"{"type":"user","sessionId":"test-123","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Read files"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"/test.txt"}}]}}
+{"type":"user","timestamp":"2024-01-15T10:30:02Z","message":{"role":"user","content":[{"tool_use_id":"tool-1","type":"tool_result","content":[{"type":"text","text":"First part"},{"type":"text","text":"Second part"}]}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        assert_eq!(session.blocks.len(), 2);
+
+        match &session.blocks[1] {
+            Block::ToolCall { output, .. } => {
+                let output_str = output.as_ref().unwrap().as_str().unwrap();
+                // Multiple text blocks should be joined with newlines
+                assert!(output_str.contains("First part"));
+                assert!(output_str.contains("Second part"));
+                assert_eq!(output_str, "First part\nSecond part");
+            }
+            _ => panic!("Expected ToolCall block"),
+        }
+    }
+
+    #[test]
+    fn test_tool_result_content_to_string() {
+        // Unit test for ToolResultContent::to_string()
+        let string_content = ToolResultContent::String("test output".to_string());
+        assert_eq!(string_content.to_string(), "test output");
+
+        let array_content = ToolResultContent::Array(vec![
+            ToolResultContentBlock {
+                block_type: Some("text".to_string()),
+                text: Some("line 1".to_string()),
+            },
+            ToolResultContentBlock {
+                block_type: Some("text".to_string()),
+                text: Some("line 2".to_string()),
+            },
+        ]);
+        assert_eq!(array_content.to_string(), "line 1\nline 2");
+
+        // Test with empty array
+        let empty_array = ToolResultContent::Array(vec![]);
+        assert_eq!(empty_array.to_string(), "");
+
+        // Test with None text fields
+        let array_with_none = ToolResultContent::Array(vec![
+            ToolResultContentBlock {
+                block_type: Some("text".to_string()),
+                text: None,
+            },
+            ToolResultContentBlock {
+                block_type: Some("text".to_string()),
+                text: Some("only this".to_string()),
+            },
+        ]);
+        assert_eq!(array_with_none.to_string(), "only this");
     }
 }
