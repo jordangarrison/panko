@@ -118,7 +118,7 @@
       "title": "Share command with tunnel and clipboard",
       "description": "Implement share command that starts server, tunnel, and copies URL",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "`agent-replay share <file>` starts local server",
         "Detects available tunnel providers",

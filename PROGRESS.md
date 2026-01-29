@@ -1,5 +1,77 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 8: Share command with tunnel and clipboard
+
+### Summary
+Implemented the full share command that starts a local server, spawns a tunnel, copies the public URL to clipboard, and handles graceful cleanup.
+
+### Changes
+- Updated `src/server/mod.rs`:
+  - Added `ServerHandle` struct for externally controllable server
+  - Added `start_server()` function that returns a `ServerHandle` instead of blocking
+  - Made `shutdown_signal()` public for use by share command
+  - `ServerHandle::stop()` method for graceful shutdown via oneshot channel
+
+- Updated `src/main.rs`:
+  - Added imports for `arboard`, `inquire`, and tunnel module
+  - Implemented full `share` subcommand:
+    - Parses session file and starts local server without opening browser
+    - Detects available tunnel providers
+    - Prompts for selection if multiple providers available (using `inquire::Select`)
+    - Optional `--tunnel` flag to skip interactive selection
+    - Optional `--port` flag to configure server port
+    - Spawns selected tunnel and waits for public URL
+    - Copies URL to clipboard with arboard (with graceful fallback on failure)
+    - Displays clear messaging with public URL
+    - Waits for Ctrl+C signal
+    - Cleanly stops both tunnel and server on shutdown
+  - Added `copy_to_clipboard()` helper function
+  - Added `prompt_tunnel_selection()` helper function
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (99 tests passed - 92 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+agent-replay share   ✓ (end-to-end working with cloudflare tunnel)
+```
+
+### End-to-End Test
+```
+$ cargo run -- share -t cloudflare tests/fixtures/sample_claude_session.jsonl
+Loaded session 'abc12345-1234-5678-abcd-123456789abc' with 10 blocks
+Local server running at: http://127.0.0.1:3003
+Starting Cloudflare Quick Tunnel tunnel...
+
+✓ URL copied to clipboard!
+
+============================================================
+🌐 Your session is now publicly available at:
+
+   https://associates-vegetarian-increased-cluster.trycloudflare.com
+
+============================================================
+
+Press Ctrl+C to stop sharing
+
+^C
+Stopping tunnel...
+Stopping server...
+Sharing stopped
+```
+
+### Acceptance Criteria
+- [x] `agent-replay share <file>` starts local server
+- [x] Detects available tunnel providers
+- [x] If multiple available, prompts user to select with inquire
+- [x] Spawns selected tunnel
+- [x] Copies public URL to clipboard with arboard
+- [x] Prints public URL to terminal with clear messaging
+- [x] Ctrl+C stops both server and tunnel cleanly
+
+---
+
 ## 2026-01-29 - Story 7: Cloudflare quick tunnel implementation
 
 ### Summary

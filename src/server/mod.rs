@@ -12,6 +12,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::signal;
+use tokio::sync::oneshot;
 
 use crate::parser::Session;
 
@@ -84,7 +85,7 @@ pub async fn run_server(session: Session, config: ServerConfig) -> anyhow::Resul
 }
 
 /// Wait for the shutdown signal (Ctrl+C).
-async fn shutdown_signal() {
+pub async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -106,6 +107,78 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+}
+
+/// Handle to a running server that can be controlled externally.
+pub struct ServerHandle {
+    /// The port the server is running on.
+    pub port: u16,
+    /// The local URL of the server.
+    pub local_url: String,
+    /// Channel to signal shutdown.
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    /// Handle to the server task.
+    task_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl ServerHandle {
+    /// Get the port the server is running on.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Get the local URL of the server.
+    pub fn local_url(&self) -> &str {
+        &self.local_url
+    }
+
+    /// Stop the server gracefully.
+    pub async fn stop(mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(handle) = self.task_handle.take() {
+            let _ = handle.await;
+        }
+    }
+}
+
+/// Start a server that can be controlled externally.
+///
+/// Returns a ServerHandle that can be used to get the URL and stop the server.
+pub async fn start_server(session: Session, config: ServerConfig) -> anyhow::Result<ServerHandle> {
+    let port = find_available_port(config.base_port)
+        .ok_or_else(|| anyhow::anyhow!("No available port found"))?;
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let local_url = format!("http://{}", addr);
+
+    let state = Arc::new(AppState {
+        session,
+        template_engine: TemplateEngine::default(),
+    });
+
+    let app = build_router(state);
+    let listener = TokioTcpListener::bind(addr).await?;
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    let task_handle = tokio::spawn(async move {
+        let shutdown = async {
+            let _ = shutdown_rx.await;
+        };
+
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown)
+            .await;
+    });
+
+    Ok(ServerHandle {
+        port,
+        local_url,
+        shutdown_tx: Some(shutdown_tx),
+        task_handle: Some(task_handle),
+    })
 }
 
 #[cfg(test)]
