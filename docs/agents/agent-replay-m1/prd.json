@@ -103,7 +103,7 @@
       "title": "Cloudflare quick tunnel implementation",
       "description": "Implement TunnelProvider for Cloudflare's free quick tunnels",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "CloudflareTunnel implements TunnelProvider",
         "is_available() checks for cloudflared binary in PATH",

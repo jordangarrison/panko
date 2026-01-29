@@ -1,5 +1,40 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 7: Cloudflare quick tunnel implementation
+
+### Summary
+Implemented the full CloudflareTunnel provider with spawn() method that creates Cloudflare quick tunnels.
+
+### Changes
+- Updated `src/tunnel/cloudflare.rs`:
+  - Added `timeout` field to `CloudflareTunnel` struct (default: 30 seconds)
+  - Added `with_timeout()` constructor for custom timeouts
+  - Implemented `parse_url_from_output()` to extract trycloudflare.com URLs from cloudflared output
+  - Implemented full `spawn()` method:
+    - Spawns `cloudflared tunnel --url localhost:<port>` command
+    - Captures stderr (where cloudflared outputs the URL)
+    - Parses the public URL in format `https://<random>.trycloudflare.com`
+    - Handles timeout and process exit errors
+    - Returns `TunnelHandle` with running process and public URL
+  - Added comprehensive unit tests for URL parsing
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (99 tests passed - 92 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] CloudflareTunnel implements TunnelProvider
+- [x] is_available() checks for cloudflared binary in PATH
+- [x] spawn() runs `cloudflared tunnel --url localhost:<port>`
+- [x] Parses public URL from cloudflared stdout (actually stderr)
+- [x] TunnelHandle drop cleans up subprocess
+
+---
+
 ## 2026-01-29 - Story 6: Tunnel provider trait and detection
 
 ### Summary
