@@ -1,5 +1,43 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 9: ngrok tunnel implementation
+
+### Summary
+Implemented the NgrokTunnel provider with full spawn() functionality that creates ngrok tunnels, supporting both free and authenticated accounts.
+
+### Changes
+- Updated `src/tunnel/ngrok.rs`:
+  - Added `timeout` field to `NgrokTunnel` struct (default: 30 seconds)
+  - Added `with_timeout()` constructor for custom timeouts
+  - Implemented `parse_url_from_output()` to extract ngrok URLs from stdout
+  - Implemented `parse_url_from_api_response()` to parse ngrok's local API JSON response
+  - Implemented `query_api_for_url()` to poll ngrok's local API (port 4040) for tunnel URL
+  - Implemented full `spawn()` method:
+    - Spawns `ngrok http <port>` command
+    - Supports auth token via `NGROK_AUTHTOKEN` environment variable
+    - Attempts to read URL from stdout (newer ngrok versions)
+    - Falls back to querying ngrok's local API at `http://localhost:4040/api/tunnels`
+    - Prefers HTTPS tunnels over HTTP
+    - Handles timeout and process exit errors
+    - Returns `TunnelHandle` with running process and public URL
+  - Added comprehensive unit tests for URL parsing from both stdout and API
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (106 tests passed - 99 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] NgrokTunnel implements TunnelProvider
+- [x] is_available() checks for ngrok binary
+- [x] spawn() runs `ngrok http <port>` and parses URL from API
+- [x] Works with both free and authenticated ngrok
+
+---
+
 ## 2026-01-29 - Story 8: Share command with tunnel and clipboard
 
 ### Summary

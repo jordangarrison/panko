@@ -135,7 +135,7 @@
       "title": "ngrok tunnel implementation",
       "description": "Add ngrok as an alternative tunnel provider",
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "NgrokTunnel implements TunnelProvider",
         "is_available() checks for ngrok binary",
