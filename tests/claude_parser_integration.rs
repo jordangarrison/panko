@@ -1,6 +1,6 @@
 //! Integration tests for the Claude Code JSONL parser.
 
-use agent_replay::parser::{Block, ClaudeParser, SessionParser};
+use panko::parser::{Block, ClaudeParser, SessionParser};
 use std::path::Path;
 
 const SAMPLE_SESSION: &str = "tests/fixtures/sample_claude_session.jsonl";

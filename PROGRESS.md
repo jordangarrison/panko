@@ -1,4 +1,4 @@
-# Agent Replay Progress Log
+# Panko Progress Log
 
 ## 2026-01-29 - Story 12: Keyboard navigation in viewer
 
@@ -57,7 +57,7 @@ cargo fmt --check    ✓
 ## 2026-01-29 - Story 11: Configuration file support
 
 ### Summary
-Implemented configuration file support with a new `config` subcommand and persistent settings stored in `~/.config/agent-replay/config.toml`.
+Implemented configuration file support with a new `config` subcommand and persistent settings stored in `~/.config/panko/config.toml`.
 
 ### Changes
 - Added dependencies to `Cargo.toml`:
@@ -107,7 +107,7 @@ Current configuration:
   ngrok_token = (not set)
   default_port = (not set, using 3000)
 
-Config file: /home/user/.config/agent-replay/config.toml
+Config file: /home/user/.config/panko/config.toml
 
 $ cargo run -- config set default_provider cloudflare
 Set default_provider = "cloudflare"
@@ -133,8 +133,8 @@ Error: Invalid provider 'invalid'. Valid options: cloudflare, ngrok, tailscale
 ```
 
 ### Acceptance Criteria
-- [x] Config stored in ~/.config/agent-replay/config.toml
-- [x] `agent-replay config` subcommand for viewing/setting options
+- [x] Config stored in ~/.config/panko/config.toml
+- [x] `panko config` subcommand for viewing/setting options
 - [x] default_provider setting to skip provider selection prompt
 - [x] ngrok_token setting for authenticated ngrok usage
 - [x] Config loaded on startup and applied to commands
@@ -259,7 +259,7 @@ cargo build          ✓
 cargo test           ✓ (99 tests passed - 92 unit, 7 integration)
 cargo clippy         ✓ (no warnings)
 cargo fmt --check    ✓
-agent-replay share   ✓ (end-to-end working with cloudflare tunnel)
+panko share   ✓ (end-to-end working with cloudflare tunnel)
 ```
 
 ### End-to-End Test
@@ -287,7 +287,7 @@ Sharing stopped
 ```
 
 ### Acceptance Criteria
-- [x] `agent-replay share <file>` starts local server
+- [x] `panko share <file>` starts local server
 - [x] Detects available tunnel providers
 - [x] If multiple available, prompts user to select with inquire
 - [x] Spawns selected tunnel
@@ -410,7 +410,7 @@ cargo build          ✓
 cargo test           ✓ (65 tests passed - 58 unit, 7 integration)
 cargo clippy         ✓ (no warnings)
 cargo fmt --check    ✓
-agent-replay view    ✓ (end-to-end working)
+panko view    ✓ (end-to-end working)
 ```
 
 ### Acceptance Criteria
@@ -420,7 +420,7 @@ agent-replay view    ✓ (end-to-end working)
 - [x] Server prints URL to terminal on startup
 - [x] Browser opens automatically (uses webbrowser crate)
 - [x] Ctrl+C gracefully shuts down server
-- [x] `agent-replay view <file>` works end-to-end
+- [x] `panko view <file>` works end-to-end
 
 ---
 

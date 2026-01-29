@@ -1,5 +1,5 @@
 {
-  "name": "agent-replay",
+  "name": "panko",
   "branchName": "feature/tui-browser",
   "description": "Interactive TUI for browsing and sharing AI coding agent sessions",
   "stories": [
@@ -30,7 +30,7 @@
         "App struct with state management",
         "Event loop handling keyboard input and terminal resize",
         "Clean terminal restoration on exit (normal and panic)",
-        "Running `agent-replay` with no args enters TUI mode",
+        "Running `panko` with no args enters TUI mode",
         "q key exits cleanly"
       ],
       "depends_on": []

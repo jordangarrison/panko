@@ -1,6 +1,6 @@
 # Agent Replay - CLI Share Tool
 
-Build a Rust CLI tool called `agent-replay` that allows users to view and share AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing.
+Build a Rust CLI tool called `panko` that allows users to view and share AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing.
 
 ## Project Context
 
@@ -22,7 +22,7 @@ AI coding agents like Claude Code store session transcripts as JSONL files. User
 ## Architecture
 
 ```
-agent-replay/
+panko/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs              # CLI entry point
@@ -82,13 +82,13 @@ pub enum Block {
 
 ## CLI Commands
 
-### `agent-replay view <file>`
+### `panko view <file>`
 - Parse the session file
 - Start local web server on available port
 - Open browser automatically
 - Ctrl+C to stop
 
-### `agent-replay share <file>`
+### `panko share <file>`
 - Same as view, plus:
 - Detect available tunnel providers
 - Prompt user to select if multiple available
@@ -96,10 +96,10 @@ pub enum Block {
 - Copy public URL to clipboard
 - Display URL in terminal
 
-### `agent-replay config`
+### `panko config`
 - Set default tunnel provider
 - Configure ngrok token if needed
-- Persist to `~/.config/agent-replay/config.toml`
+- Persist to `~/.config/panko/config.toml`
 
 ## Web Viewer Features
 

@@ -1,5 +1,5 @@
 {
-  description = "agent-replay - CLI tool for viewing and sharing AI coding agent sessions";
+  description = "panko - CLI tool for viewing and sharing AI coding agent sessions";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";

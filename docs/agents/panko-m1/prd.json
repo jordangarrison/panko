@@ -1,5 +1,5 @@
 {
-  "name": "agent-replay",
+  "name": "panko",
   "branchName": "feature/cli-share-tool",
   "description": "A Rust CLI tool for viewing and sharing AI coding agent sessions with tunnel support",
   "stories": [
@@ -13,8 +13,8 @@
         "Cargo.toml with workspace structure and all dependencies (clap, axum, tokio, serde, minijinja, rust-embed, inquire, arboard)",
         "Basic CLI with clap parsing `view` and `share` subcommands",
         "Both commands accept a file path argument",
-        "Running `agent-replay --help` shows usage information",
-        "Running `agent-replay --version` shows version"
+        "Running `panko --help` shows usage information",
+        "Running `panko --version` shows version"
       ],
       "depends_on": []
     },
@@ -80,7 +80,7 @@
         "Server prints URL to terminal on startup",
         "Browser opens automatically (use open crate or webbrowser crate)",
         "Ctrl+C gracefully shuts down server",
-        "`agent-replay view <file>` works end-to-end"
+        "`panko view <file>` works end-to-end"
       ],
       "depends_on": ["3", "4"]
     },
@@ -120,7 +120,7 @@
       "priority": 8,
       "passes": true,
       "acceptance_criteria": [
-        "`agent-replay share <file>` starts local server",
+        "`panko share <file>` starts local server",
         "Detects available tunnel providers",
         "If multiple available, prompts user to select with inquire",
         "Spawns selected tunnel",
@@ -165,8 +165,8 @@
       "priority": 11,
       "passes": true,
       "acceptance_criteria": [
-        "Config stored in ~/.config/agent-replay/config.toml",
-        "`agent-replay config` subcommand for viewing/setting options",
+        "Config stored in ~/.config/panko/config.toml",
+        "`panko config` subcommand for viewing/setting options",
         "default_provider setting to skip provider selection prompt",
         "ngrok_token setting for authenticated ngrok usage",
         "Config loaded on startup and applied to commands"

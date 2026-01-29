@@ -4,15 +4,13 @@ use clap::{Parser, Subcommand};
 use inquire::Select;
 use std::path::{Path, PathBuf};
 
-use agent_replay::config::{format_config, Config};
-use agent_replay::parser::{ClaudeParser, SessionParser};
-use agent_replay::server::{run_server, shutdown_signal, start_server, ServerConfig};
-use agent_replay::tunnel::{
-    detect_available_providers, get_provider_with_config, AvailableProvider,
-};
+use panko::config::{format_config, Config};
+use panko::parser::{ClaudeParser, SessionParser};
+use panko::server::{run_server, shutdown_signal, start_server, ServerConfig};
+use panko::tunnel::{detect_available_providers, get_provider_with_config, AvailableProvider};
 
 #[derive(Parser)]
-#[command(name = "agent-replay")]
+#[command(name = "panko")]
 #[command(version)]
 #[command(about = "View and share AI coding agent sessions")]
 #[command(
@@ -84,7 +82,7 @@ fn get_parsers() -> Vec<Box<dyn SessionParser>> {
 }
 
 /// Parse a session file using available parsers.
-fn parse_session(path: &Path) -> Result<agent_replay::parser::Session> {
+fn parse_session(path: &Path) -> Result<panko::parser::Session> {
     let parsers = get_parsers();
 
     for parser in &parsers {

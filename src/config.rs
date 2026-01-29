@@ -1,6 +1,6 @@
-//! Configuration management for agent-replay
+//! Configuration management for panko
 //!
-//! Handles loading and saving configuration from ~/.config/agent-replay/config.toml
+//! Handles loading and saving configuration from ~/.config/panko/config.toml
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -12,7 +12,7 @@ use thiserror::Error;
 const CONFIG_FILE: &str = "config.toml";
 
 /// Application name for config directory
-const APP_NAME: &str = "agent-replay";
+const APP_NAME: &str = "panko";
 
 /// Configuration errors
 #[derive(Error, Debug)]
@@ -58,7 +58,7 @@ impl Config {
 
     /// Get the config file path
     ///
-    /// Returns ~/.config/agent-replay/config.toml on Linux/macOS
+    /// Returns ~/.config/panko/config.toml on Linux/macOS
     pub fn config_path() -> ConfigResult<PathBuf> {
         let config_dir = dirs::config_dir().ok_or(ConfigError::NoConfigDir)?;
         Ok(config_dir.join(APP_NAME).join(CONFIG_FILE))
@@ -66,7 +66,7 @@ impl Config {
 
     /// Get the config directory path
     ///
-    /// Returns ~/.config/agent-replay on Linux/macOS
+    /// Returns ~/.config/panko on Linux/macOS
     pub fn config_dir() -> ConfigResult<PathBuf> {
         let config_dir = dirs::config_dir().ok_or(ConfigError::NoConfigDir)?;
         Ok(config_dir.join(APP_NAME))
@@ -297,7 +297,7 @@ mod tests {
         let result = Config::config_path();
         // This should work on most systems
         if let Ok(path) = result {
-            assert!(path.to_string_lossy().contains("agent-replay"));
+            assert!(path.to_string_lossy().contains("panko"));
             assert!(path.to_string_lossy().contains("config.toml"));
         }
     }
@@ -306,7 +306,7 @@ mod tests {
     fn test_config_dir() {
         let result = Config::config_dir();
         if let Ok(path) = result {
-            assert!(path.to_string_lossy().contains("agent-replay"));
+            assert!(path.to_string_lossy().contains("panko"));
         }
     }
 

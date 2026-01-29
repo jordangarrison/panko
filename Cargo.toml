@@ -1,10 +1,10 @@
 [package]
-name = "agent-replay"
+name = "panko"
 version = "0.1.0"
 edition = "2021"
 description = "CLI tool for viewing and sharing AI coding agent sessions"
 license = "MIT"
-repository = "https://github.com/jordangarrison/agent-replay"
+repository = "https://github.com/jordangarrison/panko"
 readme = "README.md"
 keywords = ["cli", "ai", "agent", "session", "viewer"]
 categories = ["command-line-utilities", "development-tools"]

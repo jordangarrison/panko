@@ -23,7 +23,7 @@ use std::path::Path;
 /// # Example
 ///
 /// ```ignore
-/// use agent_replay::parser::{SessionParser, Session};
+/// use panko::parser::{SessionParser, Session};
 ///
 /// fn parse_file(parser: &dyn SessionParser, path: &Path) -> Result<Session, ParseError> {
 ///     if parser.can_parse(path) {

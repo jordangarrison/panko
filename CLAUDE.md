@@ -1,4 +1,4 @@
-# Agent Replay Development
+# Panko Development
 
 ## Project Overview
 Rust CLI tool for viewing and sharing AI coding agent sessions (Claude Code, Codex, etc.)
@@ -55,8 +55,8 @@ cargo run -- <relevant command>   # Verify it works
 Write integration tests in `tests/` directory for complex behaviors.
 
 ### Current Milestones
-- M1: `docs/agents/agent-replay-m1/` - Core CLI (parser, server, tunnels)
-- M2: `docs/agents/agent-replay-m2/` - TUI Browser (depends on M1 complete)
+- M1: `docs/agents/panko-m1/` - Core CLI (parser, server, tunnels)
+- M2: `docs/agents/panko-m2/` - TUI Browser (depends on M1 complete)
 
 ### Sub-Agent Usage
 - **Explore agents**: Codebase understanding, finding patterns

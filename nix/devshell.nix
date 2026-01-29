@@ -33,7 +33,7 @@
         RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
 
         shellHook = ''
-          echo "agent-replay dev shell loaded"
+          echo "panko dev shell loaded"
           echo "Rust: $(rustc --version)"
         '';
       };
