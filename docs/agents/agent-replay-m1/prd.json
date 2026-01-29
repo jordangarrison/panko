@@ -149,7 +149,7 @@
       "title": "Tailscale serve implementation",
       "description": "Add tailscale serve as a tunnel provider for tailnet sharing",
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "TailscaleTunnel implements TunnelProvider",
         "is_available() checks for tailscale binary and logged-in status",
@@ -163,7 +163,7 @@
       "title": "Configuration file support",
       "description": "Add config command and persistent settings",
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Config stored in ~/.config/agent-replay/config.toml",
         "`agent-replay config` subcommand for viewing/setting options",

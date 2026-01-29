@@ -1,5 +1,138 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 11: Configuration file support
+
+### Summary
+Implemented configuration file support with a new `config` subcommand and persistent settings stored in `~/.config/agent-replay/config.toml`.
+
+### Changes
+- Added dependencies to `Cargo.toml`:
+  - `toml = "0.8"` for TOML parsing/serialization
+  - `dirs = "5"` for finding config directory paths
+
+- Created `src/config.rs`:
+  - `Config` struct with fields: `default_provider`, `ngrok_token`, `default_port`
+  - `ConfigError` enum for error handling
+  - `Config::load()` and `Config::save()` methods
+  - `Config::config_path()` and `Config::config_dir()` helpers
+  - `Config::effective_port()` for CLI > config > default priority
+  - `format_config()` for displaying config (masks ngrok_token with ********)
+  - 15 unit tests covering serialization, deserialization, and file operations
+
+- Updated `src/lib.rs`:
+  - Added `pub mod config;` to export the config module
+
+- Updated `src/tunnel/mod.rs`:
+  - Added `get_provider_with_config()` function to pass ngrok token to provider
+  - 5 new tests for `get_provider_with_config()`
+
+- Updated `src/main.rs`:
+  - Added `Config` subcommand with actions: Show, Set, Unset, Path
+  - Added `handle_config_command()` function with validation for provider names
+  - Updated `view` command to use config for default port
+  - Updated `share` command to:
+    - Load config on startup
+    - Use `default_provider` from config if no CLI argument
+    - Pass `ngrok_token` from config to ngrok provider
+    - Use `default_port` from config with CLI override priority
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (148 tests passed - 141 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### End-to-End Test
+```
+$ cargo run -- config
+Current configuration:
+
+  default_provider = (not set)
+  ngrok_token = (not set)
+  default_port = (not set, using 3000)
+
+Config file: /home/user/.config/agent-replay/config.toml
+
+$ cargo run -- config set default_provider cloudflare
+Set default_provider = "cloudflare"
+
+$ cargo run -- config set ngrok_token "my_secret_token"
+Set ngrok_token = "********"
+
+$ cargo run -- config set default_port 8080
+Set default_port = 8080
+
+$ cargo run -- config
+Current configuration:
+
+  default_provider = "cloudflare"
+  ngrok_token = "********" (set)
+  default_port = 8080
+
+$ cargo run -- config unset default_provider
+Unset default_provider
+
+$ cargo run -- config set default_provider invalid
+Error: Invalid provider 'invalid'. Valid options: cloudflare, ngrok, tailscale
+```
+
+### Acceptance Criteria
+- [x] Config stored in ~/.config/agent-replay/config.toml
+- [x] `agent-replay config` subcommand for viewing/setting options
+- [x] default_provider setting to skip provider selection prompt
+- [x] ngrok_token setting for authenticated ngrok usage
+- [x] Config loaded on startup and applied to commands
+
+---
+
+## 2026-01-29 - Story 10: Tailscale serve implementation
+
+### Summary
+Implemented the TailscaleTunnel provider with full spawn() functionality that creates Tailscale serve tunnels for sharing within a tailnet.
+
+### Changes
+- Updated `src/tunnel/tailscale.rs`:
+  - Implemented `is_logged_in()` method that checks `tailscale status --json` for `BackendState: "Running"`
+  - Implemented `parse_logged_in_status()` to parse JSON status and verify connection state
+  - Updated `is_available()` to check both binary existence AND logged-in status
+  - Implemented `get_hostname()` to retrieve the machine's tailscale DNS name
+  - Implemented `parse_hostname_from_status()` to extract `Self.DNSName` from status JSON
+  - Implemented `construct_serve_url()` to build HTTPS URL from hostname
+  - Implemented full `spawn()` method:
+    - Verifies tailscale binary exists and user is logged in
+    - Retrieves machine hostname from `tailscale status --json`
+    - Spawns `tailscale serve --bg=false --https=<port> http://localhost:<port>`
+    - Uses foreground mode so process can be killed to stop serving
+    - Returns `TunnelHandle` with URL `https://<hostname>`
+  - Added `stop_serve()` public method for explicit cleanup via `tailscale serve off`
+  - Added comprehensive unit tests for:
+    - Hostname parsing (with/without trailing dot, missing fields, invalid JSON)
+    - Login status parsing (Running, Stopped, NeedsLogin, Starting states)
+    - URL construction
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (128 tests passed - 121 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] TailscaleTunnel implements TunnelProvider
+- [x] is_available() checks for tailscale binary and logged-in status
+- [x] spawn() runs `tailscale serve <port>` and constructs URL from hostname
+- [x] Properly cleans up serve on drop (process kill stops foreground serve)
+
+### Notes
+- Tailscale serve only shares within your tailnet (private network), not publicly on the internet
+- The serve uses HTTPS on port 443 by default, regardless of the local port being proxied
+- Using `--bg=false` keeps the serve in foreground mode, so killing the process stops the serve
+
+---
+
 ## 2026-01-29 - Story 9: ngrok tunnel implementation
 
 ### Summary
