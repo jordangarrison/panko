@@ -4,9 +4,12 @@ use clap::{Parser, Subcommand};
 use inquire::Select;
 use std::path::{Path, PathBuf};
 
+use agent_replay::config::{format_config, Config};
 use agent_replay::parser::{ClaudeParser, SessionParser};
 use agent_replay::server::{run_server, shutdown_signal, start_server, ServerConfig};
-use agent_replay::tunnel::{detect_available_providers, get_provider, AvailableProvider};
+use agent_replay::tunnel::{
+    detect_available_providers, get_provider_with_config, AvailableProvider,
+};
 
 #[derive(Parser)]
 #[command(name = "agent-replay")]
@@ -48,6 +51,31 @@ enum Commands {
         #[arg(short, long, default_value = "3000")]
         port: u16,
     },
+    /// Manage configuration settings
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Show current configuration
+    Show,
+    /// Set a configuration value
+    Set {
+        /// Configuration key (default_provider, ngrok_token, default_port)
+        key: String,
+        /// Configuration value (use empty string to unset)
+        value: String,
+    },
+    /// Unset a configuration value
+    Unset {
+        /// Configuration key to unset
+        key: String,
+    },
+    /// Show configuration file path
+    Path,
 }
 
 /// List of available parsers.
@@ -110,6 +138,9 @@ async fn main() -> Result<()> {
             port,
             no_browser,
         } => {
+            // Load configuration
+            let app_config = Config::load().unwrap_or_default();
+
             // Check file exists
             if !file.exists() {
                 anyhow::bail!("File not found: {}", file.display());
@@ -125,15 +156,21 @@ async fn main() -> Result<()> {
                 session.blocks.len()
             );
 
+            // Calculate effective port (CLI > config > default)
+            let effective_port = app_config.effective_port(port);
+
             // Run the server
-            let config = ServerConfig {
-                base_port: port,
+            let server_config = ServerConfig {
+                base_port: effective_port,
                 open_browser: !no_browser,
             };
 
-            run_server(session, config).await?;
+            run_server(session, server_config).await?;
         }
         Commands::Share { file, tunnel, port } => {
+            // Load configuration
+            let app_config = Config::load().unwrap_or_default();
+
             // Check file exists
             if !file.exists() {
                 anyhow::bail!("File not found: {}", file.display());
@@ -149,15 +186,20 @@ async fn main() -> Result<()> {
                 session.blocks.len()
             );
 
+            // Get ngrok token from config if available
+            let ngrok_token = app_config.ngrok_token.as_deref();
+
             // Select tunnel provider
+            // Priority: CLI argument > config default_provider > auto-detect
             let selected_provider = if let Some(tunnel_name) = tunnel {
-                // User explicitly specified a provider
-                let provider = get_provider(&tunnel_name).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Unknown tunnel provider: {}. Available: cloudflare, ngrok, tailscale",
-                        tunnel_name
-                    )
-                })?;
+                // User explicitly specified a provider on CLI
+                let provider =
+                    get_provider_with_config(&tunnel_name, ngrok_token).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Unknown tunnel provider: {}. Available: cloudflare, ngrok, tailscale",
+                            tunnel_name
+                        )
+                    })?;
 
                 if !provider.is_available() {
                     anyhow::bail!(
@@ -166,6 +208,31 @@ async fn main() -> Result<()> {
                     );
                 }
 
+                AvailableProvider {
+                    name: provider.name(),
+                    display_name: provider.display_name(),
+                }
+            } else if let Some(ref default_provider) = app_config.default_provider {
+                // Use config default_provider
+                let provider =
+                    get_provider_with_config(default_provider, ngrok_token).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Unknown tunnel provider in config: {}. Available: cloudflare, ngrok, tailscale",
+                            default_provider
+                        )
+                    })?;
+
+                if !provider.is_available() {
+                    anyhow::bail!(
+                        "Default tunnel provider '{}' (from config) is not available. Please install the required binary or change your config.",
+                        default_provider
+                    );
+                }
+
+                println!(
+                    "Using {} tunnel provider (from config)",
+                    provider.display_name()
+                );
                 AvailableProvider {
                     name: provider.name(),
                     display_name: provider.display_name(),
@@ -193,25 +260,29 @@ async fn main() -> Result<()> {
                 }
             };
 
+            // Calculate effective port (CLI > config > default)
+            let effective_port = app_config.effective_port(port);
+
             // Start the local server (don't open browser for share)
-            let config = ServerConfig {
-                base_port: port,
+            let server_config = ServerConfig {
+                base_port: effective_port,
                 open_browser: false,
             };
 
-            let server_handle = start_server(session, config).await?;
-            let port = server_handle.port();
+            let server_handle = start_server(session, server_config).await?;
+            let actual_port = server_handle.port();
 
             println!("Local server running at: {}", server_handle.local_url());
 
             // Spawn the tunnel
             println!("Starting {} tunnel...", selected_provider.display_name);
 
-            let provider = get_provider(selected_provider.name).ok_or_else(|| {
-                anyhow::anyhow!("Failed to get provider: {}", selected_provider.name)
-            })?;
+            let provider = get_provider_with_config(selected_provider.name, ngrok_token)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Failed to get provider: {}", selected_provider.name)
+                })?;
 
-            let mut tunnel_handle = match provider.spawn(port) {
+            let mut tunnel_handle = match provider.spawn(actual_port) {
                 Ok(handle) => handle,
                 Err(e) => {
                     server_handle.stop().await;
@@ -247,6 +318,108 @@ async fn main() -> Result<()> {
             server_handle.stop().await;
 
             println!("Sharing stopped");
+        }
+        Commands::Config { action } => {
+            handle_config_command(action)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle config subcommand
+fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
+    match action {
+        None | Some(ConfigAction::Show) => {
+            // Show current configuration
+            let config = Config::load().context("Failed to load configuration")?;
+            println!("{}", format_config(&config));
+
+            if let Ok(path) = Config::config_path() {
+                println!("\nConfig file: {}", path.display());
+            }
+        }
+        Some(ConfigAction::Set { key, value }) => {
+            let mut config = Config::load().context("Failed to load configuration")?;
+
+            match key.as_str() {
+                "default_provider" => {
+                    if value.is_empty() {
+                        config.set_default_provider(None);
+                        println!("Unset default_provider");
+                    } else {
+                        // Validate provider name
+                        let valid_providers = ["cloudflare", "ngrok", "tailscale"];
+                        if !valid_providers.contains(&value.as_str()) {
+                            anyhow::bail!(
+                                "Invalid provider '{}'. Valid options: cloudflare, ngrok, tailscale",
+                                value
+                            );
+                        }
+                        config.set_default_provider(Some(value.clone()));
+                        println!("Set default_provider = \"{}\"", value);
+                    }
+                }
+                "ngrok_token" => {
+                    if value.is_empty() {
+                        config.set_ngrok_token(None);
+                        println!("Unset ngrok_token");
+                    } else {
+                        config.set_ngrok_token(Some(value));
+                        println!("Set ngrok_token = \"********\"");
+                    }
+                }
+                "default_port" => {
+                    if value.is_empty() {
+                        config.set_default_port(None);
+                        println!("Unset default_port");
+                    } else {
+                        let port: u16 = value
+                            .parse()
+                            .context("Invalid port number. Must be a valid port (1-65535)")?;
+                        config.set_default_port(Some(port));
+                        println!("Set default_port = {}", port);
+                    }
+                }
+                _ => {
+                    anyhow::bail!(
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port",
+                        key
+                    );
+                }
+            }
+
+            config.save().context("Failed to save configuration")?;
+        }
+        Some(ConfigAction::Unset { key }) => {
+            let mut config = Config::load().context("Failed to load configuration")?;
+
+            match key.as_str() {
+                "default_provider" => {
+                    config.set_default_provider(None);
+                    println!("Unset default_provider");
+                }
+                "ngrok_token" => {
+                    config.set_ngrok_token(None);
+                    println!("Unset ngrok_token");
+                }
+                "default_port" => {
+                    config.set_default_port(None);
+                    println!("Unset default_port");
+                }
+                _ => {
+                    anyhow::bail!(
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port",
+                        key
+                    );
+                }
+            }
+
+            config.save().context("Failed to save configuration")?;
+        }
+        Some(ConfigAction::Path) => {
+            let path = Config::config_path().context("Failed to determine config path")?;
+            println!("{}", path.display());
         }
     }
 

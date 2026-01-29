@@ -160,9 +160,27 @@ pub fn detect_available_providers() -> Vec<AvailableProvider> {
 
 /// Get a tunnel provider by name
 pub fn get_provider(name: &str) -> Option<Box<dyn TunnelProvider>> {
+    get_provider_with_config(name, None)
+}
+
+/// Get a tunnel provider by name with optional configuration
+///
+/// # Arguments
+/// * `name` - Provider name (cloudflare, ngrok, tailscale)
+/// * `ngrok_token` - Optional auth token for ngrok
+pub fn get_provider_with_config(
+    name: &str,
+    ngrok_token: Option<&str>,
+) -> Option<Box<dyn TunnelProvider>> {
     match name.to_lowercase().as_str() {
         "cloudflare" | "cloudflared" => Some(Box::new(CloudflareTunnel::new())),
-        "ngrok" => Some(Box::new(NgrokTunnel::new())),
+        "ngrok" => {
+            if let Some(token) = ngrok_token {
+                Some(Box::new(NgrokTunnel::with_token(token.to_string())))
+            } else {
+                Some(Box::new(NgrokTunnel::new()))
+            }
+        }
         "tailscale" => Some(Box::new(TailscaleTunnel::new())),
         _ => None,
     }
@@ -240,5 +258,41 @@ mod tests {
     #[test]
     fn test_binary_exists_false_for_nonexistent() {
         assert!(!binary_exists("definitely_not_a_real_binary_12345"));
+    }
+
+    #[test]
+    fn test_get_provider_with_config_ngrok_token() {
+        let provider = get_provider_with_config("ngrok", Some("test_token"));
+        assert!(provider.is_some());
+        assert_eq!(provider.unwrap().name(), "ngrok");
+    }
+
+    #[test]
+    fn test_get_provider_with_config_ngrok_no_token() {
+        let provider = get_provider_with_config("ngrok", None);
+        assert!(provider.is_some());
+        assert_eq!(provider.unwrap().name(), "ngrok");
+    }
+
+    #[test]
+    fn test_get_provider_with_config_cloudflare() {
+        // Token is ignored for cloudflare
+        let provider = get_provider_with_config("cloudflare", Some("ignored"));
+        assert!(provider.is_some());
+        assert_eq!(provider.unwrap().name(), "cloudflare");
+    }
+
+    #[test]
+    fn test_get_provider_with_config_tailscale() {
+        // Token is ignored for tailscale
+        let provider = get_provider_with_config("tailscale", None);
+        assert!(provider.is_some());
+        assert_eq!(provider.unwrap().name(), "tailscale");
+    }
+
+    #[test]
+    fn test_get_provider_with_config_unknown() {
+        let provider = get_provider_with_config("unknown", None);
+        assert!(provider.is_none());
     }
 }
