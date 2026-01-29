@@ -23,7 +23,7 @@
       "title": "Parser trait and unified types",
       "description": "Define the parser plugin architecture with trait and common session types",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "SessionParser trait defined with name(), can_parse(), and parse() methods",
         "Session struct with id, project, started_at, and blocks fields",
