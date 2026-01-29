@@ -72,7 +72,7 @@
       "title": "Local web server with view command",
       "description": "Implement axum server that serves parsed session and open browser",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "axum server starts on an available port (try 3000, increment if busy)",
         "GET / returns rendered session.html with parsed session data",

@@ -1,5 +1,48 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 5: Local web server with view command
+
+### Summary
+Verified and documented the axum web server implementation for viewing sessions in the browser.
+
+### Changes
+- Server implementation in `src/server/mod.rs`:
+  - `find_available_port()` tries ports starting from base port (default 3000)
+  - `run_server()` starts axum server with graceful shutdown
+  - `ServerConfig` struct for configurable port and browser opening
+  - `shutdown_signal()` handles Ctrl+C for graceful termination
+
+- Routes implementation in `src/server/routes.rs`:
+  - `GET /` returns rendered session.html with parsed session data
+  - `GET /assets/*` serves embedded static files (CSS, JS)
+  - `AppState` holds session and template engine
+  - Router tests for HTML and asset responses
+
+- CLI integration in `src/main.rs`:
+  - `view` subcommand with file path, port, and no-browser options
+  - Parses session file and starts server
+  - Opens browser automatically unless --no-browser flag
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (65 tests passed - 58 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+agent-replay view    ✓ (end-to-end working)
+```
+
+### Acceptance Criteria
+- [x] axum server starts on an available port (try 3000, increment if busy)
+- [x] GET / returns rendered session.html with parsed session data
+- [x] GET /assets/* serves embedded static files
+- [x] Server prints URL to terminal on startup
+- [x] Browser opens automatically (uses webbrowser crate)
+- [x] Ctrl+C gracefully shuts down server
+- [x] `agent-replay view <file>` works end-to-end
+
+---
+
 ## 2026-01-29 - Story 4: Embedded web assets and templates
 
 ### Summary
