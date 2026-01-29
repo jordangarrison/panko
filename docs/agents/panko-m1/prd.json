@@ -202,6 +202,23 @@
         "Fix character boundary panic in extract_file_edit truncation"
       ],
       "depends_on": ["3"]
+    },
+    {
+      "id": "14",
+      "title": "Check command for validation",
+      "description": "Add a check command that validates session files without starting a server",
+      "priority": 14,
+      "passes": false,
+      "acceptance_criteria": [
+        "`panko check <file>` parses file and reports success/failure",
+        "Shows summary stats on success (session ID, block count, duration)",
+        "Shows helpful error message on failure",
+        "Supports multiple files: `panko check file1.jsonl file2.jsonl`",
+        "Supports glob patterns via shell expansion",
+        "Exit code 0 on success, non-zero on any failure",
+        "Quiet mode (-q) for scripting that only outputs failures"
+      ],
+      "depends_on": ["3"]
     }
   ]
 }

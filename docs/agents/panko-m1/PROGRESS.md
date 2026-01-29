@@ -22,6 +22,7 @@
 | 11 | Configuration file support | ✅ Complete | |
 | 12 | Keyboard navigation in viewer | ✅ Complete | |
 | 13 | Fix tool_result content polymorphic type | ✅ Complete | Bug fix |
+| 14 | Check command for validation | ⬜ Not Started | For batch testing |
 
 ## Legend
 
