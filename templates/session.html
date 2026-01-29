@@ -6,6 +6,7 @@
     <title>{{ session.project | default(value=session.id) }} - Agent Replay</title>
     <link rel="stylesheet" href="/assets/styles.css">
     <script src="/assets/htmx.min.js" defer></script>
+    <script src="/assets/keyboard.js" defer></script>
 </head>
 <body>
     <header class="session-header">
@@ -17,12 +18,13 @@
             {% endif %}
             <time datetime="{{ session.started_at }}">{{ session.started_at }}</time>
         </div>
+        <button class="help-hint" aria-label="Show keyboard shortcuts" title="Press ? for keyboard shortcuts">?</button>
     </header>
 
     <main class="session-content">
         {% for block in session.blocks %}
         {% if block.type == "user_prompt" %}
-        <article class="block block-user" data-type="user_prompt">
+        <article class="block block-user" data-type="user_prompt" tabindex="0">
             <div class="block-header">
                 <span class="block-label">User</span>
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
@@ -33,7 +35,7 @@
         </article>
 
         {% elif block.type == "assistant_response" %}
-        <article class="block block-assistant" data-type="assistant_response">
+        <article class="block block-assistant" data-type="assistant_response" tabindex="0">
             <div class="block-header">
                 <span class="block-label">Assistant</span>
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
@@ -44,7 +46,7 @@
         </article>
 
         {% elif block.type == "thinking" %}
-        <article class="block block-thinking" data-type="thinking">
+        <article class="block block-thinking" data-type="thinking" tabindex="0">
             <div class="block-header">
                 <span class="block-label">Thinking</span>
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
@@ -55,7 +57,7 @@
         </article>
 
         {% elif block.type == "tool_call" %}
-        <article class="block block-tool" data-type="tool_call">
+        <article class="block block-tool" data-type="tool_call" tabindex="0">
             <div class="block-header">
                 <span class="block-label">Tool: {{ block.name }}</span>
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
@@ -73,7 +75,7 @@
         </article>
 
         {% elif block.type == "file_edit" %}
-        <article class="block block-file-edit" data-type="file_edit">
+        <article class="block block-file-edit" data-type="file_edit" tabindex="0">
             <div class="block-header">
                 <span class="block-label">File Edit: {{ block.path }}</span>
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
@@ -84,8 +86,46 @@
         {% endfor %}
     </main>
 
+    <!-- Keyboard shortcuts help overlay -->
+    <div id="help-overlay" class="help-overlay" role="dialog" aria-labelledby="help-title" aria-hidden="true">
+        <div class="help-content">
+            <h2 id="help-title">Keyboard Shortcuts</h2>
+            <button class="help-close" aria-label="Close help">&times;</button>
+            <dl class="shortcuts-list">
+                <div class="shortcut-group">
+                    <dt><kbd>j</kbd> or <kbd>↓</kbd></dt>
+                    <dd>Next block</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>k</kbd> or <kbd>↑</kbd></dt>
+                    <dd>Previous block</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>Enter</kbd> or <kbd>Space</kbd></dt>
+                    <dd>Expand/collapse details</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>g</kbd> then <kbd>g</kbd></dt>
+                    <dd>Go to first block</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>G</kbd></dt>
+                    <dd>Go to last block</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>?</kbd></dt>
+                    <dd>Show this help</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>Esc</kbd></dt>
+                    <dd>Close overlay</dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+
     <footer class="session-footer">
-        <p>{{ session.blocks | length }} blocks</p>
+        <p>{{ session.blocks | length }} blocks · Press <kbd>?</kbd> for keyboard shortcuts</p>
     </footer>
 </body>
 </html>

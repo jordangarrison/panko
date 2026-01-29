@@ -257,6 +257,157 @@ code {
     border-top: 1px solid var(--border-color);
 }
 
+/* Block focus styles for keyboard navigation */
+.block:focus {
+    outline: 2px solid var(--accent-user);
+    outline-offset: 2px;
+    box-shadow: 0 0 12px rgba(74, 158, 255, 0.3);
+}
+
+.block:focus-visible {
+    outline: 2px solid var(--accent-user);
+    outline-offset: 2px;
+    box-shadow: 0 0 12px rgba(74, 158, 255, 0.3);
+}
+
+/* Help hint button in header */
+.help-hint {
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.help-hint:hover {
+    border-color: var(--accent-user);
+    color: var(--accent-user);
+    background: var(--bg-secondary);
+}
+
+.session-header {
+    position: relative;
+}
+
+/* Help overlay */
+.help-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.help-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.help-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    max-width: 400px;
+    width: 90%;
+    position: relative;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.help-content h2 {
+    margin: 0 0 1.25rem 0;
+    font-size: 1.25rem;
+    color: var(--text-primary);
+}
+
+.help-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 1.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.help-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.shortcuts-list {
+    margin: 0;
+    padding: 0;
+}
+
+.shortcut-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.shortcut-group:last-child {
+    border-bottom: none;
+}
+
+.shortcut-group dt {
+    flex-shrink: 0;
+}
+
+.shortcut-group dd {
+    margin: 0;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+kbd {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    box-shadow: 0 2px 0 var(--border-color);
+}
+
+/* Footer kbd styling */
+.session-footer kbd {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.35rem;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
     .session-header {
@@ -269,5 +420,13 @@ code {
 
     .block-content {
         padding: 0.75rem;
+    }
+
+    .help-hint {
+        right: 0.5rem;
+    }
+
+    .help-content {
+        padding: 1rem 1.25rem;
     }
 }

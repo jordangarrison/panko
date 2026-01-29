@@ -45,6 +45,12 @@ mod tests {
     }
 
     #[test]
+    fn test_static_assets_contains_keyboard() {
+        let keyboard = StaticAssets::get("keyboard.js");
+        assert!(keyboard.is_some(), "keyboard.js should be embedded");
+    }
+
+    #[test]
     fn test_content_type_css() {
         assert_eq!(content_type("styles.css"), "text/css; charset=utf-8");
     }

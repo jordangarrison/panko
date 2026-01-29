@@ -1,5 +1,59 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 12: Keyboard navigation in viewer
+
+### Summary
+Implemented keyboard navigation for the session viewer with vim-style keybindings, focus highlighting, and a help overlay.
+
+### Changes
+- Updated `templates/session.html`:
+  - Added `tabindex="0"` to all block elements for keyboard focus
+  - Added `<script src="/assets/keyboard.js" defer></script>` reference
+  - Added help hint button (`?`) in header
+  - Added keyboard shortcuts help overlay with `#help-overlay` dialog
+  - Added footer hint about keyboard shortcuts
+
+- Created `src/assets/keyboard.js`:
+  - `j`/`ArrowDown`: Navigate to next block
+  - `k`/`ArrowUp`: Navigate to previous block
+  - `Enter`/`Space`: Expand/collapse tool details
+  - `g` then `g`: Go to first block (vim-style multi-key)
+  - `G`: Go to last block
+  - `?`: Show keyboard shortcuts help overlay
+  - `Escape`: Close help overlay
+  - Auto-focuses first block on page load
+  - Smooth scroll into view when navigating
+  - Ignores keys when typing in input/textarea
+
+- Updated `src/assets/styles.css`:
+  - Added `.block:focus` and `.block:focus-visible` styles with outline and glow
+  - Added `.help-hint` button styles (circular `?` button in header)
+  - Added `.help-overlay` modal styles with fade transition
+  - Added `.help-content` card styles
+  - Added `.shortcuts-list` and `.shortcut-group` for shortcuts display
+  - Added `kbd` element styles for keyboard key display
+  - Updated responsive styles for help overlay on mobile
+
+- Updated `src/server/assets.rs`:
+  - Added unit test `test_static_assets_contains_keyboard` to verify embedding
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (149 tests passed - 142 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] j/k or arrow keys move focus between blocks
+- [x] Focused block has visible highlight
+- [x] Enter or space could expand/collapse (prep for v0.2.0)
+- [x] ? shows keyboard shortcut help overlay
+- [x] Escape closes any open overlays
+
+---
+
 ## 2026-01-29 - Story 11: Configuration file support
 
 ### Summary

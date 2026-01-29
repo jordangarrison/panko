@@ -178,7 +178,7 @@
       "title": "Keyboard navigation in viewer",
       "description": "Add keyboard shortcuts for navigating between blocks",
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "j/k or arrow keys move focus between blocks",
         "Focused block has visible highlight",
