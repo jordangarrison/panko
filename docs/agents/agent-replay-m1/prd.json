@@ -89,7 +89,7 @@
       "title": "Tunnel provider trait and detection",
       "description": "Define tunnel provider abstraction and detect installed tools",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "TunnelProvider trait with spawn() and is_available() methods",
         "TunnelHandle struct that holds subprocess and public URL",

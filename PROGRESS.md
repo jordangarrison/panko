@@ -1,5 +1,54 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 6: Tunnel provider trait and detection
+
+### Summary
+Implemented the tunnel provider abstraction with trait, handle struct, and detection function for installed tunnel CLIs.
+
+### Changes
+- Created `src/tunnel/mod.rs`:
+  - `TunnelProvider` trait with `name()`, `display_name()`, `is_available()`, and `spawn()` methods
+  - `TunnelHandle` struct holding subprocess (`Child`), public URL, and provider name
+  - `TunnelHandle::stop()` for explicit termination and `Drop` impl for automatic cleanup
+  - `TunnelError` enum with variants: BinaryNotFound, SpawnFailed, UrlParseFailed, ProcessExited, Timeout, NotAvailable
+  - `detect_available_providers()` function that checks for cloudflared, ngrok, tailscale binaries
+  - `get_provider()` function to get a provider instance by name
+  - `AvailableProvider` struct for detection results
+  - `binary_exists()` helper using `which` command
+
+- Created `src/tunnel/cloudflare.rs`:
+  - `CloudflareTunnel` struct implementing `TunnelProvider`
+  - `is_available()` checks for cloudflared binary in PATH
+  - Stub `spawn()` returning NotAvailable (full impl in Story 7)
+
+- Created `src/tunnel/ngrok.rs`:
+  - `NgrokTunnel` struct implementing `TunnelProvider`
+  - `is_available()` checks for ngrok binary in PATH
+  - `with_token()` constructor for authenticated usage
+  - Stub `spawn()` returning NotAvailable (full impl in Story 9)
+
+- Created `src/tunnel/tailscale.rs`:
+  - `TailscaleTunnel` struct implementing `TunnelProvider`
+  - `is_available()` checks for tailscale binary in PATH
+  - `is_logged_in()` helper for login status (used in Story 10)
+  - Stub `spawn()` returning NotAvailable (full impl in Story 10)
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (90 tests passed - 83 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] TunnelProvider trait with spawn() and is_available() methods
+- [x] TunnelHandle struct that holds subprocess and public URL
+- [x] Detection function that checks which tunnel CLIs are installed (cloudflared, ngrok, tailscale)
+- [x] Returns list of available providers
+
+---
+
 ## 2026-01-29 - Story 5: Local web server with view command
 
 ### Summary
