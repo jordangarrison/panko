@@ -1,0 +1,273 @@
+/* Agent Replay - Minimal readable styles */
+
+* {
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-tertiary: #0f3460;
+    --text-primary: #e8e8e8;
+    --text-secondary: #a0a0a0;
+    --accent-user: #4a9eff;
+    --accent-assistant: #10b981;
+    --accent-thinking: #8b5cf6;
+    --accent-tool: #f59e0b;
+    --accent-file: #ef4444;
+    --border-color: #2d3748;
+    --code-bg: #0d1117;
+    --font-mono: 'SF Mono', Monaco, Consolas, 'Liberation Mono', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* Header */
+.session-header {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 1rem 2rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.session-header h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.session-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.session-id {
+    font-family: var(--font-mono);
+}
+
+.session-project {
+    color: var(--accent-assistant);
+}
+
+/* Main content */
+.session-content {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+/* Block styles */
+.block {
+    margin-bottom: 1rem;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.block-header time {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.block-label {
+    font-weight: 600;
+}
+
+.block-content {
+    padding: 1rem;
+}
+
+/* Block type variants */
+.block-user {
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--accent-user);
+}
+
+.block-user .block-label {
+    color: var(--accent-user);
+}
+
+.block-assistant {
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--accent-assistant);
+}
+
+.block-assistant .block-label {
+    color: var(--accent-assistant);
+}
+
+.block-thinking {
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--accent-thinking);
+    opacity: 0.85;
+}
+
+.block-thinking .block-label {
+    color: var(--accent-thinking);
+}
+
+.block-tool {
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--accent-tool);
+}
+
+.block-tool .block-label {
+    color: var(--accent-tool);
+}
+
+.block-file-edit {
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--accent-file);
+}
+
+.block-file-edit .block-label {
+    color: var(--accent-file);
+}
+
+/* Tool details */
+.tool-details {
+    margin: 0;
+    border-top: 1px solid var(--border-color);
+}
+
+.tool-details summary {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+}
+
+.tool-details summary:hover {
+    background: var(--border-color);
+}
+
+.tool-input,
+.tool-output {
+    margin: 0;
+    padding: 1rem;
+    background: var(--code-bg);
+    overflow-x: auto;
+}
+
+/* Code and diff styling */
+pre {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.4;
+    margin: 0;
+}
+
+code {
+    font-family: var(--font-mono);
+}
+
+.diff {
+    margin: 0;
+    padding: 1rem;
+    background: var(--code-bg);
+    overflow-x: auto;
+}
+
+/* Markdown content styling */
+.block-content h1,
+.block-content h2,
+.block-content h3,
+.block-content h4 {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.block-content h1:first-child,
+.block-content h2:first-child,
+.block-content h3:first-child {
+    margin-top: 0;
+}
+
+.block-content p {
+    margin: 0 0 0.75rem 0;
+}
+
+.block-content p:last-child {
+    margin-bottom: 0;
+}
+
+.block-content ul,
+.block-content ol {
+    margin: 0 0 0.75rem 0;
+    padding-left: 1.5rem;
+}
+
+.block-content code {
+    background: var(--code-bg);
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.block-content pre {
+    background: var(--code-bg);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+}
+
+.block-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.block-content blockquote {
+    margin: 0.75rem 0;
+    padding-left: 1rem;
+    border-left: 3px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+/* Footer */
+.session-footer {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .session-header {
+        padding: 1rem;
+    }
+
+    .session-content {
+        padding: 0.5rem;
+    }
+
+    .block-content {
+        padding: 0.75rem;
+    }
+}

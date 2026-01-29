@@ -1,0 +1,292 @@
+//! Template rendering using minijinja with embedded templates.
+
+use minijinja::{Environment, Error as JinjaError, ErrorKind};
+use pulldown_cmark::{html, Options, Parser};
+use rust_embed::Embed;
+use serde::Serialize;
+
+use crate::parser::{Block, Session};
+
+/// Embedded HTML templates.
+#[derive(Embed)]
+#[folder = "templates/"]
+pub struct Templates;
+
+/// A template engine for rendering sessions.
+pub struct TemplateEngine {
+    env: Environment<'static>,
+}
+
+impl TemplateEngine {
+    /// Create a new template engine with embedded templates.
+    pub fn new() -> Result<Self, JinjaError> {
+        let mut env = Environment::new();
+
+        // Load embedded templates
+        for file in Templates::iter() {
+            let filename = file.to_string();
+            if let Some(content) = Templates::get(&filename) {
+                let template_str = std::str::from_utf8(content.data.as_ref())
+                    .map_err(|_| JinjaError::from(ErrorKind::InvalidOperation))?;
+                env.add_template_owned(filename, template_str.to_string())?;
+            }
+        }
+
+        Ok(Self { env })
+    }
+
+    /// Render a session to HTML.
+    pub fn render_session(&self, session: &Session) -> Result<String, JinjaError> {
+        let template = self.env.get_template("session.html")?;
+        let view = SessionView::from_session(session);
+        template.render(minijinja::context! { session => view })
+    }
+}
+
+impl Default for TemplateEngine {
+    fn default() -> Self {
+        Self::new().expect("failed to initialize template engine")
+    }
+}
+
+/// A view model for rendering a session in templates.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionView {
+    pub id: String,
+    pub project: Option<String>,
+    pub started_at: String,
+    pub blocks: Vec<BlockView>,
+}
+
+impl SessionView {
+    /// Create a view model from a session.
+    pub fn from_session(session: &Session) -> Self {
+        Self {
+            id: session.id.clone(),
+            project: session.project.clone(),
+            started_at: session.started_at.to_rfc3339(),
+            blocks: session.blocks.iter().map(BlockView::from_block).collect(),
+        }
+    }
+}
+
+/// A view model for rendering a block in templates.
+#[derive(Debug, Clone, Serialize)]
+pub struct BlockView {
+    /// The block type (user_prompt, assistant_response, etc.)
+    #[serde(rename = "type")]
+    pub block_type: String,
+    /// Timestamp as ISO 8601 string.
+    pub timestamp: String,
+    /// Content rendered as HTML (for UserPrompt, AssistantResponse, Thinking).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_html: Option<String>,
+    /// Tool name (for ToolCall).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Tool input (for ToolCall).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
+    /// Tool output (for ToolCall).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
+    /// File path (for FileEdit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Diff content (for FileEdit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
+}
+
+impl BlockView {
+    /// Create a view model from a block.
+    pub fn from_block(block: &Block) -> Self {
+        match block {
+            Block::UserPrompt { content, timestamp } => Self {
+                block_type: "user_prompt".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+                content_html: Some(markdown_to_html(content)),
+                name: None,
+                input: None,
+                output: None,
+                path: None,
+                diff: None,
+            },
+            Block::AssistantResponse { content, timestamp } => Self {
+                block_type: "assistant_response".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+                content_html: Some(markdown_to_html(content)),
+                name: None,
+                input: None,
+                output: None,
+                path: None,
+                diff: None,
+            },
+            Block::Thinking { content, timestamp } => Self {
+                block_type: "thinking".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+                content_html: Some(markdown_to_html(content)),
+                name: None,
+                input: None,
+                output: None,
+                path: None,
+                diff: None,
+            },
+            Block::ToolCall {
+                name,
+                input,
+                output,
+                timestamp,
+            } => Self {
+                block_type: "tool_call".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+                content_html: None,
+                name: Some(name.clone()),
+                input: Some(input.clone()),
+                output: output.clone(),
+                path: None,
+                diff: None,
+            },
+            Block::FileEdit {
+                path,
+                diff,
+                timestamp,
+            } => Self {
+                block_type: "file_edit".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+                content_html: None,
+                name: None,
+                input: None,
+                output: None,
+                path: Some(path.clone()),
+                diff: Some(diff.clone()),
+            },
+        }
+    }
+}
+
+/// Convert markdown text to HTML.
+pub fn markdown_to_html(text: &str) -> String {
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_SMART_PUNCTUATION;
+
+    let parser = Parser::new_ext(text, options);
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{DateTime, Utc};
+
+    fn test_timestamp() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn test_templates_embedded() {
+        assert!(Templates::get("session.html").is_some());
+        assert!(Templates::get("block.html").is_some());
+    }
+
+    #[test]
+    fn test_template_engine_creation() {
+        let engine = TemplateEngine::new();
+        assert!(engine.is_ok());
+    }
+
+    #[test]
+    fn test_markdown_to_html_simple() {
+        let result = markdown_to_html("Hello **world**!");
+        assert!(result.contains("<strong>world</strong>"));
+    }
+
+    #[test]
+    fn test_markdown_to_html_code_block() {
+        let result = markdown_to_html("```rust\nfn main() {}\n```");
+        assert!(result.contains("<code"));
+        assert!(result.contains("fn main()"));
+    }
+
+    #[test]
+    fn test_markdown_to_html_links() {
+        let result = markdown_to_html("[link](https://example.com)");
+        assert!(result.contains("href=\"https://example.com\""));
+    }
+
+    #[test]
+    fn test_block_view_user_prompt() {
+        let ts = test_timestamp();
+        let block = Block::user_prompt("Hello **world**", ts);
+        let view = BlockView::from_block(&block);
+
+        assert_eq!(view.block_type, "user_prompt");
+        assert!(view.content_html.is_some());
+        assert!(view.content_html.unwrap().contains("<strong>"));
+    }
+
+    #[test]
+    fn test_block_view_tool_call() {
+        let ts = test_timestamp();
+        let block = Block::tool_call(
+            "read_file",
+            serde_json::json!({"path": "/test"}),
+            Some(serde_json::json!({"content": "data"})),
+            ts,
+        );
+        let view = BlockView::from_block(&block);
+
+        assert_eq!(view.block_type, "tool_call");
+        assert_eq!(view.name, Some("read_file".to_string()));
+        assert!(view.input.is_some());
+        assert!(view.output.is_some());
+    }
+
+    #[test]
+    fn test_block_view_file_edit() {
+        let ts = test_timestamp();
+        let block = Block::file_edit("src/main.rs", "+fn main() {}", ts);
+        let view = BlockView::from_block(&block);
+
+        assert_eq!(view.block_type, "file_edit");
+        assert_eq!(view.path, Some("src/main.rs".to_string()));
+        assert_eq!(view.diff, Some("+fn main() {}".to_string()));
+    }
+
+    #[test]
+    fn test_session_view() {
+        let ts = test_timestamp();
+        let mut session = Session::new("test-id", ts).with_project("my-project");
+        session.add_block(Block::user_prompt("Hello", ts));
+
+        let view = SessionView::from_session(&session);
+
+        assert_eq!(view.id, "test-id");
+        assert_eq!(view.project, Some("my-project".to_string()));
+        assert_eq!(view.blocks.len(), 1);
+    }
+
+    #[test]
+    fn test_render_session() {
+        let ts = test_timestamp();
+        let mut session = Session::new("test-session", ts).with_project("test-project");
+        session.add_block(Block::user_prompt("Hello **world**", ts));
+        session.add_block(Block::assistant_response("Hi there!", ts));
+
+        let engine = TemplateEngine::new().unwrap();
+        let html = engine.render_session(&session);
+
+        assert!(html.is_ok(), "render_session failed: {:?}", html.err());
+        let html = html.unwrap();
+        assert!(html.contains("test-session"));
+        assert!(html.contains("test-project"));
+        assert!(html.contains("<strong>world</strong>"));
+    }
+}

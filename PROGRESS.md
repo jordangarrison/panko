@@ -1,5 +1,98 @@
 # Agent Replay Progress Log
 
+## 2026-01-29 - Story 4: Embedded web assets and templates
+
+### Summary
+Implemented embedded web assets and template rendering using rust-embed and minijinja.
+
+### Changes
+- Created `src/server/assets.rs`:
+  - `StaticAssets` struct using rust-embed to embed `src/assets/` directory
+  - `content_type()` helper function to determine MIME types
+  - Unit tests verifying embedded files are accessible
+
+- Created `src/server/templates.rs`:
+  - `Templates` struct using rust-embed to embed `templates/` directory
+  - `TemplateEngine` struct for minijinja template rendering
+  - `SessionView` and `BlockView` view models for template rendering
+  - `markdown_to_html()` function using pulldown-cmark for markdown rendering
+  - Unit tests for template loading, markdown conversion, and session rendering
+
+- Updated `src/server/mod.rs`:
+  - Added `assets` and `templates` modules
+  - Re-exports key types for public API
+
+- Templates already in place:
+  - `templates/session.html` - main session viewer template
+  - `templates/block.html` - block partial with conditionals for each block type
+  - `src/assets/styles.css` - dark theme styling (~270 lines)
+  - `src/assets/htmx.min.js` - embedded for future interactivity
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (59 tests passed - 52 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] session.html template renders a full session with all block types
+- [x] block.html partial templates for each block type
+- [x] Minimal CSS for readable styling (not fancy, just functional)
+- [x] htmx.min.js embedded for future interactivity
+- [x] rust-embed configured to include assets/ and templates/ directories
+- [x] Templates compile and render correctly with minijinja
+
+---
+
+## 2026-01-29 - Story 3: Claude Code JSONL parser
+
+### Summary
+Implemented the ClaudeParser for parsing Claude Code session JSONL files.
+
+### Changes
+- Created `src/parser/claude.rs`:
+  - `ClaudeParser` struct implementing `SessionParser` trait
+  - `can_parse()` detects JSONL files by extension
+  - `parse()` reads JSONL line-by-line and extracts:
+    - User prompts from user messages (filtering out meta/command messages)
+    - Assistant text responses
+    - Thinking blocks from thinking content
+    - Tool calls with matched tool results
+    - File edits from Edit/Write/NotebookEdit tool calls
+  - Handles pending tool calls that get resolved when tool_result arrives
+  - Extracts session metadata (id, project path, start timestamp)
+
+- Created `tests/fixtures/sample_claude_session.jsonl`:
+  - Sample session with user prompts, assistant responses, thinking, tool calls
+  - Covers Edit and Write file operations
+
+- Created `tests/claude_parser_integration.rs`:
+  - 7 integration tests covering all block types
+  - Validates metadata extraction
+  - Verifies tool call results are matched correctly
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (43 tests passed - 36 unit, 7 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] ClaudeParser implements SessionParser trait
+- [x] Correctly identifies Claude JSONL files via can_parse()
+- [x] Parses user messages into UserPrompt blocks
+- [x] Parses assistant messages into AssistantResponse blocks
+- [x] Parses tool_use and tool_result into ToolCall blocks
+- [x] Parses thinking content into Thinking blocks
+- [x] Handles file edit tool calls and extracts diffs into FileEdit blocks
+- [x] Integration test with sample Claude JSONL file
+
+---
+
 ## 2026-01-29 - Story 2: Parser trait and unified types
 
 ### Summary

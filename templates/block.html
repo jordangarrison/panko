@@ -1,0 +1,61 @@
+{% if block.type == "user_prompt" %}
+<article class="block block-user" data-type="user_prompt">
+    <div class="block-header">
+        <span class="block-label">User</span>
+        <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
+    </div>
+    <div class="block-content">
+        {{ block.content_html | safe }}
+    </div>
+</article>
+
+{% elif block.type == "assistant_response" %}
+<article class="block block-assistant" data-type="assistant_response">
+    <div class="block-header">
+        <span class="block-label">Assistant</span>
+        <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
+    </div>
+    <div class="block-content">
+        {{ block.content_html | safe }}
+    </div>
+</article>
+
+{% elif block.type == "thinking" %}
+<article class="block block-thinking" data-type="thinking">
+    <div class="block-header">
+        <span class="block-label">Thinking</span>
+        <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
+    </div>
+    <div class="block-content">
+        {{ block.content_html | safe }}
+    </div>
+</article>
+
+{% elif block.type == "tool_call" %}
+<article class="block block-tool" data-type="tool_call">
+    <div class="block-header">
+        <span class="block-label">Tool: {{ block.name }}</span>
+        <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
+    </div>
+    <details class="tool-details">
+        <summary>Input</summary>
+        <pre class="tool-input"><code>{{ block.input | tojson(indent=2) }}</code></pre>
+    </details>
+    {% if block.output %}
+    <details class="tool-details">
+        <summary>Output</summary>
+        <pre class="tool-output"><code>{{ block.output | tojson(indent=2) }}</code></pre>
+    </details>
+    {% endif %}
+</article>
+
+{% elif block.type == "file_edit" %}
+<article class="block block-file-edit" data-type="file_edit">
+    <div class="block-header">
+        <span class="block-label">File Edit: {{ block.path }}</span>
+        <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
+    </div>
+    <pre class="diff"><code>{{ block.diff }}</code></pre>
+</article>
+
+{% endif %}
