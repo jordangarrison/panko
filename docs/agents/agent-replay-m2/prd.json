@@ -1,0 +1,225 @@
+{
+  "name": "agent-replay",
+  "branchName": "feature/tui-browser",
+  "description": "Interactive TUI for browsing and sharing AI coding agent sessions",
+  "stories": [
+    {
+      "id": "1",
+      "title": "Session scanner trait and Claude implementation",
+      "description": "Create scanner abstraction for discovering sessions without full parsing",
+      "priority": 1,
+      "passes": false,
+      "acceptance_criteria": [
+        "SessionMeta struct with id, path, project_path, updated_at, message_count, first_prompt_preview",
+        "SessionScanner trait with scan_directory() and default_roots() methods",
+        "ClaudeScanner implementation that scans ~/.claude/projects/",
+        "Extracts metadata quickly without parsing full JSONL content",
+        "Handles missing/corrupted files gracefully",
+        "Unit tests with mock directory structure"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "2",
+      "title": "TUI application scaffold with ratatui",
+      "description": "Set up basic TUI application structure and event loop",
+      "priority": 2,
+      "passes": false,
+      "acceptance_criteria": [
+        "Add ratatui and crossterm dependencies",
+        "App struct with state management",
+        "Event loop handling keyboard input and terminal resize",
+        "Clean terminal restoration on exit (normal and panic)",
+        "Running `agent-replay` with no args enters TUI mode",
+        "q key exits cleanly"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "3",
+      "title": "Session list widget with project grouping",
+      "description": "Render sessions grouped by project in a tree view",
+      "priority": 3,
+      "passes": false,
+      "acceptance_criteria": [
+        "Sessions grouped under project path headers",
+        "Project folders can be collapsed/expanded with h/l or arrows",
+        "Each session shows: truncated id, relative time, message count",
+        "Visual indicator for selected item",
+        "j/k navigation moves selection",
+        "Scrolls viewport when selection moves off-screen"
+      ],
+      "depends_on": ["1", "2"]
+    },
+    {
+      "id": "4",
+      "title": "Preview panel",
+      "description": "Show details of selected session in right panel",
+      "priority": 4,
+      "passes": false,
+      "acceptance_criteria": [
+        "Panel shows session id, full path, started timestamp",
+        "Shows message count and estimated token count if available",
+        "Shows first prompt preview (truncated to fit)",
+        "Shows tool usage summary (count by tool name)",
+        "Updates when selection changes",
+        "Gracefully handles sessions with minimal metadata"
+      ],
+      "depends_on": ["3"]
+    },
+    {
+      "id": "5",
+      "title": "Layout with resizable panels",
+      "description": "Implement the full TUI layout with header, panels, and footer",
+      "priority": 5,
+      "passes": false,
+      "acceptance_criteria": [
+        "Header with app title and search input area",
+        "Two-column layout: session list (left), preview (right)",
+        "Footer with action hints",
+        "Responsive to terminal size",
+        "Minimum size handling (show message if too small)",
+        "Tab key switches focus between panels (visual indicator)"
+      ],
+      "depends_on": ["3", "4"]
+    },
+    {
+      "id": "6",
+      "title": "View action integration",
+      "description": "Launch web viewer for selected session",
+      "priority": 6,
+      "passes": false,
+      "acceptance_criteria": [
+        "v or Enter triggers view action",
+        "TUI suspends (restores terminal) while viewer runs",
+        "Spawns server and opens browser (reuses M1 view command)",
+        "Status message shows 'Viewing session... Press Ctrl+C to return'",
+        "Returning to TUI restores state correctly"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "7",
+      "title": "Share action integration",
+      "description": "Share selected session with tunnel from TUI",
+      "priority": 7,
+      "passes": false,
+      "acceptance_criteria": [
+        "s triggers share action",
+        "If multiple tunnel providers, shows selection popup within TUI",
+        "Spawns tunnel, copies URL to clipboard",
+        "Shows sharing status with public URL in TUI",
+        "Can stop sharing with Esc or dedicated key",
+        "Status bar shows 'Sharing at <url> - press Esc to stop'"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "8",
+      "title": "Copy path and open folder actions",
+      "description": "Quick actions for file management",
+      "priority": 8,
+      "passes": false,
+      "acceptance_criteria": [
+        "c copies full session file path to clipboard",
+        "Shows brief confirmation message",
+        "o opens containing folder in system file manager",
+        "Works on macOS (open), Linux (xdg-open), Windows (explorer)"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "9",
+      "title": "Fuzzy search",
+      "description": "Filter sessions by fuzzy matching project path and prompt content",
+      "priority": 9,
+      "passes": false,
+      "acceptance_criteria": [
+        "/ focuses search input in header",
+        "Typing filters session list in real-time",
+        "Fuzzy matches against project path and first_prompt_preview",
+        "Matching characters highlighted in results",
+        "Enter selects first match",
+        "Esc clears search and shows all sessions",
+        "Empty search shows all sessions"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "10",
+      "title": "Help overlay",
+      "description": "Show keyboard shortcuts in modal overlay",
+      "priority": 10,
+      "passes": false,
+      "acceptance_criteria": [
+        "? toggles help overlay",
+        "Overlay shows all keyboard shortcuts grouped by category",
+        "Semi-transparent background over main UI",
+        "Any key or Esc closes overlay",
+        "Help hint [?] shown in header"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "11",
+      "title": "Refresh and auto-refresh",
+      "description": "Refresh session list manually and optionally watch for changes",
+      "priority": 11,
+      "passes": false,
+      "acceptance_criteria": [
+        "r manually refreshes session list",
+        "Shows brief 'Refreshing...' indicator",
+        "Preserves selection if session still exists",
+        "Optional: use notify crate to watch for new sessions",
+        "New sessions appear without manual refresh (if watching enabled)"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "12",
+      "title": "Sorting options",
+      "description": "Allow sorting sessions by different criteria",
+      "priority": 12,
+      "passes": false,
+      "acceptance_criteria": [
+        "Default sort: by updated_at descending (newest first)",
+        "S key cycles through sort options",
+        "Sort options: date (newest), date (oldest), message count, project name",
+        "Current sort shown in header or status bar",
+        "Sort preference persisted in config"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "13",
+      "title": "Multiple agent support in scanner",
+      "description": "Extend scanner to detect and scan multiple agent session locations",
+      "priority": 13,
+      "passes": false,
+      "acceptance_criteria": [
+        "Scanner registry that holds multiple SessionScanner implementations",
+        "Codex scanner stub (for future implementation)",
+        "Sessions tagged with agent type in UI",
+        "Filter by agent type (optional)",
+        "Gracefully handles missing directories (e.g., Codex not installed)"
+      ],
+      "depends_on": ["1"]
+    },
+    {
+      "id": "14",
+      "title": "Session deletion with confirmation",
+      "description": "Allow deleting sessions from TUI with safety confirmation",
+      "priority": 14,
+      "passes": false,
+      "acceptance_criteria": [
+        "d key initiates delete for selected session",
+        "Confirmation dialog: 'Delete session abc123? (y/N)'",
+        "y confirms and deletes file",
+        "Any other key cancels",
+        "Session removed from list after deletion",
+        "Cannot delete while sharing is active"
+      ],
+      "depends_on": ["5"]
+    }
+  ]
+}
