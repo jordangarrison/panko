@@ -1,0 +1,8 @@
+# Nix
+result
+result-*
+.direnv/
+
+# Rust (for when Cargo.toml exists)
+/target/
+Cargo.lock

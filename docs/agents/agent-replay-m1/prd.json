@@ -1,0 +1,192 @@
+{
+  "name": "agent-replay",
+  "branchName": "feature/cli-share-tool",
+  "description": "A Rust CLI tool for viewing and sharing AI coding agent sessions with tunnel support",
+  "stories": [
+    {
+      "id": "1",
+      "title": "Project scaffolding and CLI structure",
+      "description": "Set up the Rust project with cargo, dependencies, and basic CLI argument parsing",
+      "priority": 1,
+      "passes": true,
+      "acceptance_criteria": [
+        "Cargo.toml with workspace structure and all dependencies (clap, axum, tokio, serde, minijinja, rust-embed, inquire, arboard)",
+        "Basic CLI with clap parsing `view` and `share` subcommands",
+        "Both commands accept a file path argument",
+        "Running `agent-replay --help` shows usage information",
+        "Running `agent-replay --version` shows version"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "2",
+      "title": "Parser trait and unified types",
+      "description": "Define the parser plugin architecture with trait and common session types",
+      "priority": 2,
+      "passes": false,
+      "acceptance_criteria": [
+        "SessionParser trait defined with name(), can_parse(), and parse() methods",
+        "Session struct with id, project, started_at, and blocks fields",
+        "Block enum with variants: UserPrompt, AssistantResponse, ToolCall, Thinking, FileEdit",
+        "ParseError type with appropriate error variants",
+        "Unit tests for type serialization/deserialization"
+      ],
+      "depends_on": ["1"]
+    },
+    {
+      "id": "3",
+      "title": "Claude Code JSONL parser",
+      "description": "Implement parser for Claude Code session files in ~/.claude/projects/",
+      "priority": 3,
+      "passes": false,
+      "acceptance_criteria": [
+        "ClaudeParser implements SessionParser trait",
+        "Correctly identifies Claude JSONL files via can_parse()",
+        "Parses user messages into UserPrompt blocks",
+        "Parses assistant messages into AssistantResponse blocks",
+        "Parses tool_use and tool_result into ToolCall blocks",
+        "Parses thinking content into Thinking blocks",
+        "Handles file edit tool calls and extracts diffs into FileEdit blocks",
+        "Integration test with sample Claude JSONL file"
+      ],
+      "depends_on": ["2"]
+    },
+    {
+      "id": "4",
+      "title": "Embedded web assets and templates",
+      "description": "Create HTML templates and static assets, embed them in the binary",
+      "priority": 4,
+      "passes": false,
+      "acceptance_criteria": [
+        "session.html template renders a full session with all block types",
+        "block.html partial templates for each block type",
+        "Minimal CSS for readable styling (not fancy, just functional)",
+        "htmx.min.js embedded for future interactivity",
+        "rust-embed configured to include assets/ and templates/ directories",
+        "Templates compile and render correctly with minijinja"
+      ],
+      "depends_on": ["2"]
+    },
+    {
+      "id": "5",
+      "title": "Local web server with view command",
+      "description": "Implement axum server that serves parsed session and open browser",
+      "priority": 5,
+      "passes": false,
+      "acceptance_criteria": [
+        "axum server starts on an available port (try 3000, increment if busy)",
+        "GET / returns rendered session.html with parsed session data",
+        "GET /assets/* serves embedded static files",
+        "Server prints URL to terminal on startup",
+        "Browser opens automatically (use open crate or webbrowser crate)",
+        "Ctrl+C gracefully shuts down server",
+        "`agent-replay view <file>` works end-to-end"
+      ],
+      "depends_on": ["3", "4"]
+    },
+    {
+      "id": "6",
+      "title": "Tunnel provider trait and detection",
+      "description": "Define tunnel provider abstraction and detect installed tools",
+      "priority": 6,
+      "passes": false,
+      "acceptance_criteria": [
+        "TunnelProvider trait with spawn() and is_available() methods",
+        "TunnelHandle struct that holds subprocess and public URL",
+        "Detection function that checks which tunnel CLIs are installed (cloudflared, ngrok, tailscale)",
+        "Returns list of available providers"
+      ],
+      "depends_on": ["1"]
+    },
+    {
+      "id": "7",
+      "title": "Cloudflare quick tunnel implementation",
+      "description": "Implement TunnelProvider for Cloudflare's free quick tunnels",
+      "priority": 7,
+      "passes": false,
+      "acceptance_criteria": [
+        "CloudflareTunnel implements TunnelProvider",
+        "is_available() checks for cloudflared binary in PATH",
+        "spawn() runs `cloudflared tunnel --url localhost:<port>`",
+        "Parses public URL from cloudflared stdout",
+        "TunnelHandle drop cleans up subprocess"
+      ],
+      "depends_on": ["6"]
+    },
+    {
+      "id": "8",
+      "title": "Share command with tunnel and clipboard",
+      "description": "Implement share command that starts server, tunnel, and copies URL",
+      "priority": 8,
+      "passes": false,
+      "acceptance_criteria": [
+        "`agent-replay share <file>` starts local server",
+        "Detects available tunnel providers",
+        "If multiple available, prompts user to select with inquire",
+        "Spawns selected tunnel",
+        "Copies public URL to clipboard with arboard",
+        "Prints public URL to terminal with clear messaging",
+        "Ctrl+C stops both server and tunnel cleanly"
+      ],
+      "depends_on": ["5", "7"]
+    },
+    {
+      "id": "9",
+      "title": "ngrok tunnel implementation",
+      "description": "Add ngrok as an alternative tunnel provider",
+      "priority": 9,
+      "passes": false,
+      "acceptance_criteria": [
+        "NgrokTunnel implements TunnelProvider",
+        "is_available() checks for ngrok binary",
+        "spawn() runs `ngrok http <port>` and parses URL from API",
+        "Works with both free and authenticated ngrok"
+      ],
+      "depends_on": ["6"]
+    },
+    {
+      "id": "10",
+      "title": "Tailscale serve implementation",
+      "description": "Add tailscale serve as a tunnel provider for tailnet sharing",
+      "priority": 10,
+      "passes": false,
+      "acceptance_criteria": [
+        "TailscaleTunnel implements TunnelProvider",
+        "is_available() checks for tailscale binary and logged-in status",
+        "spawn() runs `tailscale serve <port>` and constructs URL from hostname",
+        "Properly cleans up serve on drop"
+      ],
+      "depends_on": ["6"]
+    },
+    {
+      "id": "11",
+      "title": "Configuration file support",
+      "description": "Add config command and persistent settings",
+      "priority": 11,
+      "passes": false,
+      "acceptance_criteria": [
+        "Config stored in ~/.config/agent-replay/config.toml",
+        "`agent-replay config` subcommand for viewing/setting options",
+        "default_provider setting to skip provider selection prompt",
+        "ngrok_token setting for authenticated ngrok usage",
+        "Config loaded on startup and applied to commands"
+      ],
+      "depends_on": ["8"]
+    },
+    {
+      "id": "12",
+      "title": "Keyboard navigation in viewer",
+      "description": "Add keyboard shortcuts for navigating between blocks",
+      "priority": 12,
+      "passes": false,
+      "acceptance_criteria": [
+        "j/k or arrow keys move focus between blocks",
+        "Focused block has visible highlight",
+        "Enter or space could expand/collapse (prep for v0.2.0)",
+        "? shows keyboard shortcut help overlay",
+        "Escape closes any open overlays"
+      ],
+      "depends_on": ["5"]
+    }
+  ]
+}

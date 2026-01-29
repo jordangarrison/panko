@@ -1,0 +1,54 @@
+[package]
+name = "agent-replay"
+version = "0.1.0"
+edition = "2021"
+description = "CLI tool for viewing and sharing AI coding agent sessions"
+license = "MIT"
+repository = "https://github.com/jordangarrison/agent-replay"
+readme = "README.md"
+keywords = ["cli", "ai", "agent", "session", "viewer"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web server
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Templates
+minijinja = { version = "2", features = ["loader"] }
+
+# Embedded assets
+rust-embed = "8"
+
+# Interactive prompts
+inquire = "0.7"
+
+# Clipboard
+arboard = "3"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Browser opening
+webbrowser = "1"
+
+# Markdown rendering
+pulldown-cmark = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
