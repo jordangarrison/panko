@@ -3,10 +3,12 @@
 //! This module provides a terminal user interface for browsing, previewing,
 //! and acting on AI coding agent sessions.
 
+mod actions;
 mod app;
 mod events;
 pub mod widgets;
 
+pub use actions::Action;
 pub use app::{App, AppResult, FocusedPanel, MIN_HEIGHT, MIN_WIDTH};
 pub use events::{Event, EventHandler};
 pub use widgets::{SessionList, SessionListState, TreeItem};
@@ -46,8 +48,23 @@ pub fn restore() -> io::Result<()> {
     Ok(())
 }
 
+/// Result of running the TUI for one iteration.
+/// Returns the action that needs to be handled (if any).
+pub enum RunResult {
+    /// App is done (quit requested).
+    Done,
+    /// Continue running (no action needed).
+    Continue,
+    /// Action needs to be handled outside the TUI loop.
+    Action(Action),
+}
+
 /// Run the TUI application.
-pub fn run(terminal: &mut Tui, app: &mut App) -> AppResult<()> {
+///
+/// This function runs the main event loop. When a pending action is detected
+/// (like ViewSession), it returns the action so the caller can handle it
+/// (e.g., by suspending the TUI and running the server).
+pub fn run(terminal: &mut Tui, app: &mut App) -> AppResult<RunResult> {
     let event_handler = EventHandler::new(250); // 250ms tick rate
 
     while app.is_running() {
@@ -60,9 +77,15 @@ pub fn run(terminal: &mut Tui, app: &mut App) -> AppResult<()> {
             Event::Key(key_event) => app.handle_key_event(key_event)?,
             Event::Resize(width, height) => app.handle_resize(width, height),
         }
+
+        // Check if there's a pending action that needs external handling
+        if app.has_pending_action() {
+            let action = app.take_pending_action();
+            return Ok(RunResult::Action(action));
+        }
     }
 
-    Ok(())
+    Ok(RunResult::Done)
 }
 
 #[cfg(test)]

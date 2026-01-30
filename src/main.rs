@@ -352,9 +352,6 @@ async fn main() -> Result<()> {
 
 /// Run the TUI application.
 fn run_tui() -> Result<()> {
-    // Initialize terminal
-    let mut terminal = tui::init().context("Failed to initialize terminal")?;
-
     // Create application state and load sessions
     let mut app = tui::App::new();
     if let Err(e) = app.load_sessions() {
@@ -362,14 +359,128 @@ fn run_tui() -> Result<()> {
         eprintln!("Warning: Failed to load sessions: {}", e);
     }
 
-    // Run the application
-    let result = tui::run(&mut terminal, &mut app);
+    // Main loop that handles TUI and actions
+    loop {
+        // Initialize terminal
+        let mut terminal = tui::init().context("Failed to initialize terminal")?;
 
-    // Restore terminal
-    tui::restore().context("Failed to restore terminal")?;
+        // Run the TUI until it returns
+        let result = tui::run(&mut terminal, &mut app);
 
-    // Handle any errors from the app
-    result.map_err(|e| anyhow::anyhow!("Application error: {}", e))
+        // Restore terminal before handling any action
+        tui::restore().context("Failed to restore terminal")?;
+
+        // Handle the result
+        match result {
+            Ok(tui::RunResult::Done) => {
+                // User quit, exit the loop
+                break;
+            }
+            Ok(tui::RunResult::Continue) => {
+                // This shouldn't happen but just continue
+                continue;
+            }
+            Ok(tui::RunResult::Action(action)) => {
+                // Handle the action
+                handle_tui_action(&action)?;
+                // Continue the TUI loop after action completes
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Application error: {}", e));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle an action triggered from the TUI.
+fn handle_tui_action(action: &tui::Action) -> Result<()> {
+    match action {
+        tui::Action::ViewSession(path) => {
+            // View the session using the existing server code
+            handle_view_from_tui(path)?;
+        }
+        tui::Action::ShareSession(_path) => {
+            // TODO: Implement in Story 7
+            println!("Share action not yet implemented");
+        }
+        tui::Action::CopyPath(_path) => {
+            // TODO: Implement in Story 8
+            println!("Copy path action not yet implemented");
+        }
+        tui::Action::OpenFolder(_path) => {
+            // TODO: Implement in Story 8
+            println!("Open folder action not yet implemented");
+        }
+        tui::Action::None => {
+            // Nothing to do
+        }
+    }
+    Ok(())
+}
+
+/// Handle viewing a session from the TUI.
+///
+/// This is similar to the view command but with messaging appropriate
+/// for returning to the TUI afterwards.
+fn handle_view_from_tui(path: &Path) -> Result<()> {
+    // Check file exists
+    if !path.exists() {
+        eprintln!("Error: File not found: {}", path.display());
+        wait_for_key("Press Enter to return to the browser...");
+        return Ok(());
+    }
+
+    // Parse the session
+    let session = match parse_session(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: Failed to parse session: {}", e);
+            wait_for_key("Press Enter to return to the browser...");
+            return Ok(());
+        }
+    };
+
+    println!(
+        "\nViewing session '{}' with {} blocks",
+        session.id,
+        session.blocks.len()
+    );
+    println!("Press Ctrl+C to return to the browser\n");
+
+    // Load configuration for port
+    let app_config = Config::load().unwrap_or_default();
+    let effective_port = app_config.effective_port(3000);
+
+    // Run the server
+    let server_config = ServerConfig {
+        base_port: effective_port,
+        open_browser: true,
+    };
+
+    // Run the server in a tokio runtime
+    let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
+    rt.block_on(async {
+        if let Err(e) = run_server(session, server_config).await {
+            eprintln!("Server error: {}", e);
+        }
+    });
+
+    println!("\nReturning to session browser...\n");
+
+    Ok(())
+}
+
+/// Wait for the user to press Enter.
+fn wait_for_key(message: &str) {
+    use std::io::{self, BufRead, Write};
+
+    print!("{}", message);
+    let _ = io::stdout().flush();
+
+    let stdin = io::stdin();
+    let _ = stdin.lock().lines().next();
 }
 
 /// Handle config subcommand

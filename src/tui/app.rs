@@ -1,6 +1,7 @@
 //! Application state management for the TUI.
 
 use crate::scanner::{ClaudeScanner, SessionMeta, SessionScanner};
+use crate::tui::actions::Action;
 use crate::tui::widgets::{PreviewPanel, SessionList, SessionListState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -52,6 +53,8 @@ pub struct App {
     search_query: String,
     /// Whether we're currently in search input mode
     search_active: bool,
+    /// Pending action to be executed outside the TUI loop
+    pending_action: Action,
 }
 
 impl Default for App {
@@ -71,6 +74,7 @@ impl App {
             focused_panel: FocusedPanel::default(),
             search_query: String::new(),
             search_active: false,
+            pending_action: Action::None,
         }
     }
 
@@ -84,6 +88,7 @@ impl App {
             focused_panel: FocusedPanel::default(),
             search_query: String::new(),
             search_active: false,
+            pending_action: Action::None,
         }
     }
 
@@ -180,6 +185,12 @@ impl App {
             KeyCode::Char('G') if self.focused_panel == FocusedPanel::SessionList => {
                 self.session_list_state.select_last();
             }
+            // View: v or Enter to view selected session
+            KeyCode::Char('v') | KeyCode::Enter => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::ViewSession(session.path.clone());
+                }
+            }
             // Refresh: r to reload sessions
             KeyCode::Char('r') => {
                 let _ = self.refresh_sessions();
@@ -191,6 +202,21 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Get the pending action (if any).
+    pub fn pending_action(&self) -> &Action {
+        &self.pending_action
+    }
+
+    /// Take the pending action, replacing it with None.
+    pub fn take_pending_action(&mut self) -> Action {
+        std::mem::take(&mut self.pending_action)
+    }
+
+    /// Check if there is a pending action.
+    pub fn has_pending_action(&self) -> bool {
+        !matches!(self.pending_action, Action::None)
     }
 
     /// Get the currently focused panel.
@@ -482,12 +508,14 @@ impl App {
     /// Render the footer with keyboard hints.
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let hints = Line::from(vec![
-            Span::styled(" j/k ", Style::default().fg(Color::Cyan)),
+            Span::styled(" v/Enter ", Style::default().fg(Color::Cyan)),
+            Span::raw("view  "),
+            Span::styled("j/k ", Style::default().fg(Color::Cyan)),
             Span::raw("nav  "),
             Span::styled("h/l ", Style::default().fg(Color::Cyan)),
-            Span::raw("collapse/expand  "),
+            Span::raw("expand  "),
             Span::styled("Tab ", Style::default().fg(Color::Cyan)),
-            Span::raw("switch panel  "),
+            Span::raw("panel  "),
             Span::styled("r ", Style::default().fg(Color::Cyan)),
             Span::raw("refresh  "),
             Span::styled("q ", Style::default().fg(Color::Cyan)),
@@ -802,5 +830,104 @@ mod tests {
         // q should still quit even when preview is focused
         app.handle_key_event(key_event(KeyCode::Char('q'))).unwrap();
         assert!(!app.is_running());
+    }
+
+    // Tests for view action
+
+    #[test]
+    fn test_pending_action_default_is_none() {
+        let app = App::new();
+        assert_eq!(*app.pending_action(), Action::None);
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_v_triggers_view_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'v' to view
+        app.handle_key_event(key_event(KeyCode::Char('v'))).unwrap();
+
+        // Should have a pending ViewSession action
+        assert!(app.has_pending_action());
+        match app.pending_action() {
+            Action::ViewSession(path) => {
+                assert!(path.to_string_lossy().contains("abc12345.jsonl"));
+            }
+            _ => panic!("Expected ViewSession action"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_enter_triggers_view_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press Enter to view
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+
+        // Should have a pending ViewSession action
+        assert!(app.has_pending_action());
+        match app.pending_action() {
+            Action::ViewSession(_) => {}
+            _ => panic!("Expected ViewSession action"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_v_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // First item is a project, not a session
+        assert!(app.selected_session().is_none());
+
+        // Press 'v' on project
+        app.handle_key_event(key_event(KeyCode::Char('v'))).unwrap();
+
+        // Should not have a pending action since we're on a project, not a session
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_v_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'v' with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('v'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_take_pending_action_clears_action() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+        app.handle_key_event(key_event(KeyCode::Char('v'))).unwrap();
+
+        // Take the action
+        let action = app.take_pending_action();
+        assert!(matches!(action, Action::ViewSession(_)));
+
+        // Action should be cleared
+        assert!(!app.has_pending_action());
+        assert_eq!(*app.pending_action(), Action::None);
+    }
+
+    #[test]
+    fn test_view_action_works_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Press 'v' - should still work since we have a selected session
+        app.handle_key_event(key_event(KeyCode::Char('v'))).unwrap();
+
+        // Should have a pending action
+        assert!(app.has_pending_action());
     }
 }

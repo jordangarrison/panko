@@ -1,5 +1,65 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 6: View action integration
+
+### Summary
+Implemented the view action that launches the web viewer for a selected session from the TUI. The TUI suspends while the viewer runs and restores correctly when the user presses Ctrl+C.
+
+### Changes
+- Created `src/tui/actions.rs`:
+  - `Action` enum with variants: `ViewSession`, `ShareSession`, `CopyPath`, `OpenFolder`, `None`
+  - Derives `Debug`, `Clone`, `PartialEq`, `Eq`, `Default`
+  - 6 unit tests for action creation and default
+
+- Updated `src/tui/app.rs`:
+  - Added `pending_action: Action` field to `App` struct
+  - Added `v` and `Enter` key handling to trigger `ViewSession` action
+  - Added `pending_action()`, `take_pending_action()`, and `has_pending_action()` methods
+  - Updated footer to show `v/Enter view` hint
+  - 8 new unit tests for view action handling
+
+- Updated `src/tui/mod.rs`:
+  - Added `mod actions` and `pub use actions::Action`
+  - Changed `run()` to return `RunResult` enum
+  - `RunResult::Action(action)` returns when TUI needs to hand off control
+  - `RunResult::Done` returns when user quits
+
+- Updated `src/main.rs`:
+  - Refactored `run_tui()` to loop: init TUI → run → restore → handle action
+  - Added `handle_tui_action()` to dispatch actions
+  - Added `handle_view_from_tui()` to run server with appropriate messaging
+  - Added `wait_for_key()` helper for error handling
+  - Server runs with "Press Ctrl+C to return to the browser" messaging
+  - State preserved between TUI suspensions (sessions stay loaded)
+
+### Test Coverage (14 new tests)
+- 6 tests in `tui::actions` for action enum
+- 8 tests in `tui::app` for view action handling:
+  - `test_pending_action_default_is_none`
+  - `test_handle_key_v_triggers_view_on_session`
+  - `test_handle_key_enter_triggers_view_on_session`
+  - `test_handle_key_v_does_nothing_on_project`
+  - `test_handle_key_v_does_nothing_when_empty`
+  - `test_take_pending_action_clears_action`
+  - `test_view_action_works_regardless_of_focus`
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (265 tests passed - 249 unit, 16 integration)
+cargo clippy         ✓ (1 expected warning: search_active unused)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] v or Enter triggers view action
+- [x] TUI suspends (restores terminal) while viewer runs
+- [x] Spawns server and opens browser (reuses M1 view command)
+- [x] Status message shows 'Viewing session... Press Ctrl+C to return'
+- [x] Returning to TUI restores state correctly
+
+---
+
 ## 2026-01-30 - M2 Story 5: Layout with resizable panels
 
 ### Summary
