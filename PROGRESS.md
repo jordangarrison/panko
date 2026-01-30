@@ -1,5 +1,80 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 2: TUI application scaffold with ratatui
+
+### Summary
+Set up the basic TUI application structure and event loop using ratatui and crossterm.
+
+### Changes
+- Updated `Cargo.toml`:
+  - Added `ratatui = "0.29"` for TUI framework
+  - Added `crossterm = "0.28"` for terminal handling
+
+- Created `src/tui/mod.rs`:
+  - Module entry point with `init()`, `restore()`, and `run()` functions
+  - Panic hook to restore terminal on crash
+  - `Tui` type alias for terminal backend
+  - Uses `CrosstermBackend<io::Stdout>` for terminal I/O
+
+- Created `src/tui/app.rs`:
+  - `App` struct with state management (running, width, height)
+  - `AppResult` type alias for error handling
+  - `handle_key_event()` for keyboard input (q, Esc, Ctrl+C quit)
+  - `handle_resize()` for terminal resize events
+  - `render()` for drawing UI (placeholder for now)
+  - 9 unit tests for app state and key handling
+
+- Created `src/tui/events.rs`:
+  - `Event` enum with `Tick`, `Key`, and `Resize` variants
+  - `EventHandler` that runs in a separate thread
+  - Polls crossterm events with configurable tick rate (250ms)
+  - Filters to only handle key press events (not release/repeat)
+
+- Updated `src/lib.rs`:
+  - Added `pub mod tui;` to export the TUI module
+
+- Updated `src/main.rs`:
+  - Made command subcommand optional (`Option<Commands>`)
+  - Added `run_tui()` function called when no args provided
+  - Updated help text to mention TUI mode
+
+### Test Coverage (12 new tests)
+- App creation and default
+- Quit method
+- Key handling: q, Esc, Ctrl+C quit; other keys don't
+- Terminal resize
+- Tick method
+- Event debug formatting
+- Event resize variant
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (193 tests passed - 177 unit, 16 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### End-to-End Test
+```
+$ cargo run -- --help
+A CLI tool for viewing and sharing AI coding agent sessions...
+Run without arguments to enter interactive TUI mode.
+
+$ cargo run
+(Enters TUI mode, press 'q' to exit)
+```
+
+### Acceptance Criteria
+- [x] Add ratatui and crossterm dependencies
+- [x] App struct with state management
+- [x] Event loop handling keyboard input and terminal resize
+- [x] Clean terminal restoration on exit (normal and panic)
+- [x] Running `panko` with no args enters TUI mode
+- [x] q key exits cleanly
+
+---
+
 ## 2026-01-30 - M2 Story 1: Session scanner trait and Claude implementation
 
 ### Summary

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use panko::config::{format_config, Config};
 use panko::parser::{ClaudeParser, SessionParser};
 use panko::server::{run_server, shutdown_signal, start_server, ServerConfig};
+use panko::tui;
 use panko::tunnel::{detect_available_providers, get_provider_with_config, AvailableProvider};
 
 #[derive(Parser)]
@@ -14,11 +15,11 @@ use panko::tunnel::{detect_available_providers, get_provider_with_config, Availa
 #[command(version)]
 #[command(about = "View and share AI coding agent sessions")]
 #[command(
-    long_about = "A CLI tool for viewing and sharing AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing."
+    long_about = "A CLI tool for viewing and sharing AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing.\n\nRun without arguments to enter interactive TUI mode."
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -140,7 +141,15 @@ fn prompt_tunnel_selection(providers: &[AvailableProvider]) -> Result<AvailableP
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
+    // If no subcommand is provided, enter TUI mode
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            return run_tui();
+        }
+    };
+
+    match command {
         Commands::View {
             file,
             port,
@@ -339,6 +348,24 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Run the TUI application.
+fn run_tui() -> Result<()> {
+    // Initialize terminal
+    let mut terminal = tui::init().context("Failed to initialize terminal")?;
+
+    // Create application state
+    let mut app = tui::App::new();
+
+    // Run the application
+    let result = tui::run(&mut terminal, &mut app);
+
+    // Restore terminal
+    tui::restore().context("Failed to restore terminal")?;
+
+    // Handle any errors from the app
+    result.map_err(|e| anyhow::anyhow!("Application error: {}", e))
 }
 
 /// Handle config subcommand

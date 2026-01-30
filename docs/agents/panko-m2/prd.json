@@ -24,7 +24,7 @@
       "title": "TUI application scaffold with ratatui",
       "description": "Set up basic TUI application structure and event loop",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Add ratatui and crossterm dependencies",
         "App struct with state management",
