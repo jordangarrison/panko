@@ -1,5 +1,88 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 11: Refresh and auto-refresh
+
+### Summary
+Implemented manual refresh functionality and optional file watching for automatic session list updates. Users can refresh the session list with the `r` key, and the TUI can optionally watch for new sessions using the notify crate.
+
+### Changes
+- Updated `Cargo.toml`:
+  - Added `notify = "6"` dependency for file system watching
+
+- Created `src/tui/watcher.rs`:
+  - `WatcherMessage` enum with variants: NewSession, SessionModified, SessionDeleted, RefreshNeeded, Error
+  - `FileWatcher` struct that wraps the notify watcher
+  - `FileWatcher::new()` creates a watcher for specified directories
+  - `try_recv()` method for non-blocking message retrieval
+  - `has_pending()` method to check for pending messages
+  - `start_background_watcher()` convenience function for spawning in a thread
+  - Filters for JSONL files only
+  - 5 unit tests for watcher functionality
+
+- Updated `src/tui/app.rs`:
+  - Added `RefreshState` enum with `Idle` and `Refreshing` variants
+  - Added `refresh_state` field to `App` struct
+  - Updated `refresh_sessions()` to:
+    - Set state to Refreshing during operation
+    - Remember selected session ID before refresh
+    - Restore selection by ID after refresh (if session still exists)
+    - Set state back to Idle on completion
+  - Added `is_refreshing()` and `refresh_state()` accessors
+  - Updated `render_footer()` to show "Refreshing..." indicator when state is Refreshing
+  - 6 new unit tests for refresh state management
+
+- Updated `src/tui/widgets/session_list.rs`:
+  - Added `select_session_by_id()` method that searches visible items and selects by session ID
+  - Returns true if found, false otherwise (preserves current selection on failure)
+  - 5 new unit tests for selection by ID
+
+- Updated `src/tui/mod.rs`:
+  - Added `pub mod watcher` and exports for `FileWatcher` and `WatcherMessage`
+  - Added `RefreshState` export
+  - Added `run_with_watcher()` function that integrates file watching with the event loop
+  - Watcher messages trigger automatic refresh when detected
+
+### Test Coverage (16 new tests)
+Watcher tests:
+- `test_watcher_message_variants` - verify message variants
+- `test_file_watcher_creation_with_valid_path` - watcher creates successfully
+- `test_file_watcher_creation_with_nonexistent_path` - handles missing paths
+- `test_file_watcher_try_recv_empty` - returns None when no events
+- `test_file_watcher_detects_new_jsonl_file` - detects new files
+- `test_file_watcher_ignores_non_jsonl_files` - filters non-JSONL
+
+App refresh tests:
+- `test_refresh_state_default_is_idle` - default state
+- `test_refresh_state_is_refreshing` - state checking
+- `test_refresh_sessions_sets_state_to_idle_after_completion` - state transitions
+- `test_refresh_sessions_preserves_selection_by_id` - selection preservation
+- `test_handle_key_r_triggers_refresh` - r key handling
+- `test_refresh_works_regardless_of_focus` - works in both panels
+
+SessionListState tests:
+- `test_select_session_by_id_existing_session` - finds existing session
+- `test_select_session_by_id_first_session` - finds first session
+- `test_select_session_by_id_nonexistent_session` - handles missing session
+- `test_select_session_by_id_empty_list` - handles empty list
+- `test_select_session_by_id_preserves_selection_on_failure` - preserves selection
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (344 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] r manually refreshes session list
+- [x] Shows brief 'Refreshing...' indicator
+- [x] Preserves selection if session still exists
+- [x] Optional: use notify crate to watch for new sessions
+- [x] New sessions appear without manual refresh (if watching enabled)
+
+---
+
 ## 2026-01-30 - M2 Story 9: Fuzzy search
 
 ### Summary

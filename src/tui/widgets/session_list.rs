@@ -380,6 +380,22 @@ impl SessionListState {
         self.items.is_empty()
     }
 
+    /// Select a session by its ID.
+    ///
+    /// Searches through visible items and selects the session with the matching ID.
+    /// If the session is not found (e.g., it was deleted), selection remains unchanged.
+    pub fn select_session_by_id(&mut self, session_id: &str) -> bool {
+        for (visible_idx, &item_idx) in self.visible_indices.iter().enumerate() {
+            if let Some(TreeItem::Session(meta)) = self.items.get(item_idx) {
+                if meta.id == session_id {
+                    self.selected = visible_idx;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Get all items (for testing).
     #[cfg(test)]
     pub fn items(&self) -> &[TreeItem] {
@@ -1131,5 +1147,74 @@ mod tests {
 
         // All sessions should still be available
         assert_eq!(state.visible_count(), 5); // 2 projects + 3 sessions
+    }
+
+    // === Selection by ID Tests ===
+
+    #[test]
+    fn test_select_session_by_id_existing_session() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+
+        // Select a session by its ID
+        let found = state.select_session_by_id("ghi11111");
+        assert!(found);
+
+        // Verify the correct session is selected
+        let selected = state.selected_session();
+        assert!(selected.is_some());
+        assert_eq!(selected.unwrap().id, "ghi11111");
+    }
+
+    #[test]
+    fn test_select_session_by_id_first_session() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+
+        // Select the first session (under first project)
+        let found = state.select_session_by_id("abc12345");
+        assert!(found);
+
+        let selected = state.selected_session();
+        assert!(selected.is_some());
+        assert_eq!(selected.unwrap().id, "abc12345");
+    }
+
+    #[test]
+    fn test_select_session_by_id_nonexistent_session() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+
+        // Initial selection
+        let initial_selection = state.selected();
+
+        // Try to select a session that doesn't exist
+        let found = state.select_session_by_id("nonexistent_id");
+        assert!(!found);
+
+        // Selection should remain unchanged
+        assert_eq!(state.selected(), initial_selection);
+    }
+
+    #[test]
+    fn test_select_session_by_id_empty_list() {
+        let mut state = SessionListState::from_sessions(vec![]);
+
+        let found = state.select_session_by_id("any_id");
+        assert!(!found);
+    }
+
+    #[test]
+    fn test_select_session_by_id_preserves_selection_on_failure() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+
+        // Navigate to a specific position
+        state.select_next();
+        state.select_next();
+        let selection_before = state.selected();
+
+        // Try to select non-existent session
+        let found = state.select_session_by_id("does_not_exist");
+        assert!(!found);
+
+        // Selection should be preserved
+        assert_eq!(state.selected(), selection_before);
     }
 }

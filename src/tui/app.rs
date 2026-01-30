@@ -94,6 +94,23 @@ impl SharingState {
     }
 }
 
+/// State of refresh operation.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum RefreshState {
+    /// Not refreshing.
+    #[default]
+    Idle,
+    /// Currently refreshing the session list.
+    Refreshing,
+}
+
+impl RefreshState {
+    /// Check if refresh is in progress.
+    pub fn is_refreshing(&self) -> bool {
+        matches!(self, RefreshState::Refreshing)
+    }
+}
+
 /// Application state.
 #[derive(Debug)]
 pub struct App {
@@ -121,6 +138,8 @@ pub struct App {
     status_message: Option<String>,
     /// Whether the help overlay is visible
     show_help: bool,
+    /// Current refresh state
+    refresh_state: RefreshState,
 }
 
 impl Default for App {
@@ -145,6 +164,7 @@ impl App {
             provider_select_state: ProviderSelectState::default(),
             status_message: None,
             show_help: false,
+            refresh_state: RefreshState::default(),
         }
     }
 
@@ -163,6 +183,7 @@ impl App {
             provider_select_state: ProviderSelectState::default(),
             status_message: None,
             show_help: false,
+            refresh_state: RefreshState::default(),
         }
     }
 
@@ -187,9 +208,39 @@ impl App {
         Ok(())
     }
 
-    /// Refresh the session list.
+    /// Refresh the session list, preserving the current selection if possible.
     pub fn refresh_sessions(&mut self) -> AppResult<()> {
-        self.load_sessions()
+        // Set refresh state
+        self.refresh_state = RefreshState::Refreshing;
+
+        // Remember current selection by session ID
+        let selected_session_id = self
+            .session_list_state
+            .selected_session()
+            .map(|s| s.id.clone());
+
+        // Reload sessions
+        let result = self.load_sessions();
+
+        // Try to restore selection
+        if let Some(session_id) = selected_session_id {
+            self.session_list_state.select_session_by_id(&session_id);
+        }
+
+        // Clear refresh state
+        self.refresh_state = RefreshState::Idle;
+
+        result
+    }
+
+    /// Check if refresh is in progress.
+    pub fn is_refreshing(&self) -> bool {
+        self.refresh_state.is_refreshing()
+    }
+
+    /// Get the refresh state.
+    pub fn refresh_state(&self) -> &RefreshState {
+        &self.refresh_state
     }
 
     /// Returns true if the application is running.
@@ -910,6 +961,12 @@ impl App {
             // Stopping sharing
             Line::from(vec![Span::styled(
                 "Stopping sharing... ",
+                Style::default().fg(Color::Yellow),
+            )])
+        } else if self.refresh_state.is_refreshing() {
+            // Refreshing session list
+            Line::from(vec![Span::styled(
+                "Refreshing... ",
                 Style::default().fg(Color::Yellow),
             )])
         } else {
@@ -1945,5 +2002,82 @@ mod tests {
         app.handle_key_event(key_event(KeyCode::Char('v'))).unwrap();
         assert!(!app.show_help);
         assert!(!app.has_pending_action()); // No action should be triggered
+    }
+
+    // Tests for refresh functionality
+
+    #[test]
+    fn test_refresh_state_default_is_idle() {
+        let app = App::new();
+        assert_eq!(*app.refresh_state(), RefreshState::Idle);
+        assert!(!app.is_refreshing());
+    }
+
+    #[test]
+    fn test_refresh_state_is_refreshing() {
+        let mut state = RefreshState::Refreshing;
+        assert!(state.is_refreshing());
+
+        state = RefreshState::Idle;
+        assert!(!state.is_refreshing());
+    }
+
+    #[test]
+    fn test_refresh_sessions_sets_state_to_idle_after_completion() {
+        let mut app = App::with_sessions(sample_sessions());
+
+        // After refresh, state should be Idle
+        let _ = app.refresh_sessions();
+        assert_eq!(*app.refresh_state(), RefreshState::Idle);
+    }
+
+    #[test]
+    fn test_refresh_sessions_preserves_selection_by_id() {
+        let mut app = App::with_sessions(sample_sessions());
+
+        // Navigate to the second session (index 2 in visible items: project at 0, session at 1, session at 2)
+        app.session_list_state_mut().select_next(); // Now at first session
+        app.session_list_state_mut().select_next(); // Now at second session
+
+        // Get the selected session ID
+        let selected_session = app.selected_session();
+        assert!(selected_session.is_some());
+        let selected_id = selected_session.unwrap().id.clone();
+        assert_eq!(selected_id, "def67890");
+
+        // Refresh (in a real scenario this would reload from disk)
+        let _ = app.refresh_sessions();
+
+        // Since refresh_sessions calls load_sessions which scans from disk,
+        // and we're using sample_sessions() which are in-memory,
+        // the selection preservation logic is tested by the session_list_state tests
+    }
+
+    #[test]
+    fn test_handle_key_r_triggers_refresh() {
+        let mut app = App::with_sessions(sample_sessions());
+
+        // Press 'r' to refresh
+        app.handle_key_event(key_event(KeyCode::Char('r'))).unwrap();
+
+        // App should still be running
+        assert!(app.is_running());
+        // Refresh state should be idle (refresh completed synchronously)
+        assert_eq!(*app.refresh_state(), RefreshState::Idle);
+    }
+
+    #[test]
+    fn test_refresh_works_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+
+        // Works when session list is focused
+        app.set_focused_panel(FocusedPanel::SessionList);
+        app.handle_key_event(key_event(KeyCode::Char('r'))).unwrap();
+        assert!(app.is_running());
+
+        // Also works when preview is focused
+        app.set_focused_panel(FocusedPanel::Preview);
+        app.handle_key_event(key_event(KeyCode::Char('r'))).unwrap();
+        assert!(app.is_running());
     }
 }

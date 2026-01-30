@@ -7,12 +7,14 @@ mod actions;
 mod app;
 mod events;
 pub mod sharing;
+pub mod watcher;
 pub mod widgets;
 
 pub use actions::Action;
-pub use app::{App, AppResult, FocusedPanel, SharingState, MIN_HEIGHT, MIN_WIDTH};
+pub use app::{App, AppResult, FocusedPanel, RefreshState, SharingState, MIN_HEIGHT, MIN_WIDTH};
 pub use events::{Event, EventHandler};
 pub use sharing::{SharingCommand, SharingHandle, SharingMessage};
+pub use watcher::{FileWatcher, WatcherMessage};
 pub use widgets::{ProviderOption, SessionList, SessionListState, TreeItem};
 
 use std::io;
@@ -67,9 +69,40 @@ pub enum RunResult {
 /// (like ViewSession), it returns the action so the caller can handle it
 /// (e.g., by suspending the TUI and running the server).
 pub fn run(terminal: &mut Tui, app: &mut App) -> AppResult<RunResult> {
+    run_with_watcher(terminal, app, None)
+}
+
+/// Run the TUI application with optional file watcher.
+///
+/// When a file watcher is provided, the TUI will automatically refresh
+/// when new session files are detected.
+pub fn run_with_watcher(
+    terminal: &mut Tui,
+    app: &mut App,
+    watcher: Option<&FileWatcher>,
+) -> AppResult<RunResult> {
     let event_handler = EventHandler::new(250); // 250ms tick rate
 
     while app.is_running() {
+        // Check for file watcher notifications
+        if let Some(w) = watcher {
+            while let Some(msg) = w.try_recv() {
+                match msg {
+                    WatcherMessage::NewSession(_)
+                    | WatcherMessage::SessionModified(_)
+                    | WatcherMessage::SessionDeleted(_)
+                    | WatcherMessage::RefreshNeeded => {
+                        // Trigger a refresh
+                        let _ = app.refresh_sessions();
+                    }
+                    WatcherMessage::Error(e) => {
+                        // Log error but continue - watcher errors shouldn't crash the TUI
+                        app.set_status_message(format!("Watcher error: {}", e));
+                    }
+                }
+            }
+        }
+
         // Draw the UI
         terminal.draw(|frame| app.render(frame))?;
 

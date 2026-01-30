@@ -165,7 +165,7 @@
       "title": "Refresh and auto-refresh",
       "description": "Refresh session list manually and optionally watch for changes",
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "r manually refreshes session list",
         "Shows brief 'Refreshing...' indicator",
