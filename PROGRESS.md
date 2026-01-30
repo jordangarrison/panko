@@ -1,5 +1,44 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 15: Open draft PR for milestone
+
+### Summary
+Created a draft pull request on GitHub for the feature/tui-browser branch, completing Milestone 2: TUI Browser.
+
+### Changes
+- Pushed `feature/tui-browser` branch to remote
+- Created draft PR #2 via `gh pr create --draft`
+- PR title: "feat(tui): Interactive TUI for browsing and sharing AI coding agent sessions"
+- PR body includes:
+  - Summary of all features implemented
+  - Full keyboard shortcuts reference
+  - Test plan checklist
+
+### PR Details
+- URL: https://github.com/jordangarrison/panko/pull/2
+- Target branch: main
+- Status: Draft (not ready for review)
+
+### Validation
+```
+All 14 previous stories have passes: true in prd.json ✓
+Branch pushed to origin/feature/tui-browser ✓
+Draft PR created with proper title ✓
+PR body includes summary of features ✓
+PR body includes test plan checklist ✓
+```
+
+### Acceptance Criteria
+- [x] All previous stories (1-14) have passes: true
+- [x] Branch is pushed to remote with all commits
+- [x] Draft PR created via gh CLI targeting main branch
+- [x] PR title: 'feat(tui): Interactive TUI for browsing and sharing AI coding agent sessions'
+- [x] PR body includes summary of features implemented
+- [x] PR body includes test plan checklist
+- [x] PR is marked as draft (not ready for review)
+
+---
+
 ## 2026-01-30 - M2 Story 12: Sorting options
 
 ### Summary

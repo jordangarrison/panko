@@ -226,7 +226,7 @@
       "title": "Open draft PR for milestone",
       "description": "Create a draft pull request on GitHub for the feature/tui-browser branch",
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "All previous stories (1-14) have passes: true",
         "Branch is pushed to remote with all commits",
