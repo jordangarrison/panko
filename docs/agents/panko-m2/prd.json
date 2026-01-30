@@ -40,7 +40,7 @@
       "title": "Session list widget with project grouping",
       "description": "Render sessions grouped by project in a tree view",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Sessions grouped under project path headers",
         "Project folders can be collapsed/expanded with h/l or arrows",

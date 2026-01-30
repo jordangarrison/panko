@@ -355,8 +355,12 @@ fn run_tui() -> Result<()> {
     // Initialize terminal
     let mut terminal = tui::init().context("Failed to initialize terminal")?;
 
-    // Create application state
+    // Create application state and load sessions
     let mut app = tui::App::new();
+    if let Err(e) = app.load_sessions() {
+        // Log warning but continue - user can still refresh
+        eprintln!("Warning: Failed to load sessions: {}", e);
+    }
 
     // Run the application
     let result = tui::run(&mut terminal, &mut app);

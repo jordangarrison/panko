@@ -1,5 +1,77 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 3: Session list widget with project grouping
+
+### Summary
+Implemented the session list widget that displays sessions grouped by project in a tree view with navigation and expand/collapse functionality.
+
+### Changes
+- Created `src/tui/widgets/mod.rs`:
+  - Module entry point for TUI widgets
+  - Re-exports `SessionList`, `SessionListState`, and `TreeItem`
+
+- Created `src/tui/widgets/session_list.rs`:
+  - `TreeItem` enum with `Project` and `Session` variants
+  - `SessionListState` struct for managing tree state:
+    - Builds tree from `Vec<SessionMeta>` grouped by project
+    - Tracks visible indices for navigation (respects collapsed projects)
+    - Selection management with `select_next()`, `select_previous()`, `select_first()`, `select_last()`
+    - Expand/collapse with `expand_selected()`, `collapse_selected()`, `toggle_selected()`
+    - `collapse_or_parent()` for vim-style h key behavior
+    - `adjust_scroll()` for viewport scrolling
+  - `SessionList` widget implementing ratatui's `StatefulWidget`
+    - Renders tree items with project headers and session details
+    - Highlight style for selected item
+    - Different styles for projects vs sessions
+  - Helper functions: `truncate_id()`, `format_relative_time()`
+  - 26 unit tests covering tree construction, navigation, collapse/expand
+
+- Updated `src/tui/mod.rs`:
+  - Added `pub mod widgets;`
+  - Re-exports `SessionList`, `SessionListState`, `TreeItem`
+
+- Updated `src/tui/app.rs`:
+  - Added `session_list_state: SessionListState` to `App` struct
+  - Added `with_sessions()` constructor for testing
+  - Added `load_sessions()` and `refresh_sessions()` methods using `ClaudeScanner`
+  - Key handling: j/k for navigation, h/l for collapse/expand, g/G for first/last, r for refresh
+  - Updated `render()` to use three-part layout (header, content, footer)
+  - `render_header()` shows session count and help hint
+  - `render_content()` shows session list or empty state message
+  - `render_footer()` shows keyboard shortcuts
+  - 18 unit tests covering app state and key handling
+
+- Updated `src/main.rs`:
+  - `run_tui()` now calls `app.load_sessions()` on startup
+
+### Test Coverage (44 new/updated tests)
+- TreeItem creation and display text
+- ID truncation and relative time formatting
+- SessionListState construction from sessions
+- Navigation: select next/previous/first/last
+- Expand/collapse functionality
+- Visible count tracking
+- Viewport scroll adjustment
+- App key handling for all navigation keys
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (215 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Sessions grouped under project path headers
+- [x] Project folders can be collapsed/expanded with h/l or arrows
+- [x] Each session shows: truncated id, relative time, message count
+- [x] Visual indicator for selected item
+- [x] j/k navigation moves selection
+- [x] Scrolls viewport when selection moves off-screen
+
+---
+
 ## 2026-01-30 - M2 Story 2: TUI application scaffold with ratatui
 
 ### Summary

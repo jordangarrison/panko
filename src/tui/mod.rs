@@ -5,9 +5,11 @@
 
 mod app;
 mod events;
+pub mod widgets;
 
 pub use app::{App, AppResult};
 pub use events::{Event, EventHandler};
+pub use widgets::{SessionList, SessionListState, TreeItem};
 
 use std::io;
 use std::panic;
