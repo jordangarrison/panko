@@ -23,7 +23,7 @@
 | 11 | Refresh and auto-refresh | ✅ Complete | |
 | 12 | Sorting options | ✅ Complete | |
 | 13 | Multiple agent support in scanner | ✅ Complete | Added 2026-01-30 |
-| 14 | Session deletion with confirmation | ⬜ Not Started | |
+| 14 | Session deletion with confirmation | ✅ Complete | Added 2026-01-30 |
 
 ## Legend
 
@@ -35,6 +35,37 @@
 ## Work Log
 
 ### 2026-01-30
+
+**Story 14: Session deletion with confirmation** - ✅ Complete
+
+Implemented session deletion functionality with a confirmation dialog to prevent accidental deletions.
+
+**Changes:**
+- Added `DeleteSession(PathBuf)` action variant to `src/tui/actions.rs`
+- Added `ConfirmationState` enum to `src/tui/app.rs` with `Inactive` and `ConfirmingDelete` variants
+- Added `confirmation_state` field to `App` struct
+- Implemented `'d'` key handler to initiate deletion (with sharing-active check)
+- Implemented confirmation key handler (`y`/`Y` confirms, any other key cancels)
+- Created `src/tui/widgets/confirmation.rs` with `ConfirmationDialog` widget
+- Added `remove_session_by_path()` method to `SessionListState` for removing deleted sessions from the list
+- Added delete shortcut to help overlay
+- Handles deletion during sharing by showing status message
+
+**Acceptance Criteria Met:**
+- ✅ `d` key initiates delete for selected session
+- ✅ Confirmation dialog: 'Delete session abc123? (y/N)'
+- ✅ `y` confirms and deletes file
+- ✅ Any other key cancels
+- ✅ Session removed from list after deletion
+- ✅ Cannot delete while sharing is active
+
+**Validation Results:**
+- `cargo build` ✅
+- `cargo test` ✅ (405 tests passed)
+- `cargo clippy` ✅ (no warnings)
+- `cargo fmt --check` ✅
+
+---
 
 **Story 13: Multiple agent support in scanner** - ✅ Complete
 

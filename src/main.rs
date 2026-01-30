@@ -583,6 +583,19 @@ fn handle_tui_action(
                 app.set_status_message("✗ Cannot determine parent folder");
             }
         }
+        tui::Action::DeleteSession(path) => {
+            // Delete the session file
+            match std::fs::remove_file(path) {
+                Ok(()) => {
+                    // Remove the session from the list
+                    app.remove_session_by_path(path);
+                    app.set_status_message("✓ Deleted session");
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Delete failed: {}", e));
+                }
+            }
+        }
         tui::Action::None => {
             // Nothing to do
         }

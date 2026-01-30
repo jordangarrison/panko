@@ -36,6 +36,8 @@ pub enum Action {
     CopyPath(PathBuf),
     /// Open the containing folder in the file manager.
     OpenFolder(PathBuf),
+    /// Delete a session file.
+    DeleteSession(PathBuf),
     /// No action to perform.
     #[default]
     None,
@@ -135,6 +137,16 @@ mod tests {
                 assert_eq!(provider, "cloudflare");
             }
             _ => panic!("Expected SharingStarted"),
+        }
+    }
+
+    #[test]
+    fn test_action_delete_session() {
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let action = Action::DeleteSession(path.clone());
+        match action {
+            Action::DeleteSession(p) => assert_eq!(p, path),
+            _ => panic!("Expected DeleteSession"),
         }
     }
 }

@@ -560,6 +560,67 @@ impl SessionListState {
         false
     }
 
+    /// Remove a session by its file path.
+    ///
+    /// Removes the session from both the items list and original_sessions.
+    /// If the removed session was selected, moves selection to the previous item.
+    /// If a project becomes empty after removal, the project is also removed.
+    pub fn remove_session_by_path(&mut self, path: &std::path::PathBuf) {
+        // Find and remove from original_sessions
+        self.original_sessions.retain(|s| &s.path != path);
+
+        // Find the session's item index
+        let session_item_idx = self.items.iter().position(|item| {
+            if let TreeItem::Session(meta) = item {
+                &meta.path == path
+            } else {
+                false
+            }
+        });
+
+        if let Some(session_idx) = session_item_idx {
+            // Find the parent project's index (search backwards)
+            let mut project_idx = None;
+            for i in (0..session_idx).rev() {
+                if self.items[i].is_project() {
+                    project_idx = Some(i);
+                    break;
+                }
+            }
+
+            // Remove the session
+            self.items.remove(session_idx);
+
+            // Check if parent project is now empty and remove it
+            if let Some(proj_idx) = project_idx {
+                // Check if there are sessions remaining under this project
+                let has_sessions = self
+                    .items
+                    .get(proj_idx + 1)
+                    .map(|item| matches!(item, TreeItem::Session(_)))
+                    .unwrap_or(false);
+
+                if !has_sessions {
+                    // Remove the empty project
+                    self.items.remove(proj_idx);
+                } else {
+                    // Update the session count on the project
+                    if let TreeItem::Project { session_count, .. } = &mut self.items[proj_idx] {
+                        *session_count = session_count.saturating_sub(1);
+                    }
+                }
+            }
+
+            // Rebuild visible indices
+            self.rebuild_visible_indices();
+
+            // Adjust selection if needed
+            if self.selected >= self.visible_indices.len() {
+                self.selected = self.visible_indices.len().saturating_sub(1);
+            }
+        }
+    }
+
     /// Get all items (for testing).
     #[cfg(test)]
     pub fn items(&self) -> &[TreeItem] {
@@ -1699,5 +1760,106 @@ mod tests {
 
         // Sort order should be preserved
         assert_eq!(state.sort_order(), SortOrder::MessageCount);
+    }
+
+    // === Remove Session Tests ===
+
+    #[test]
+    fn test_remove_session_by_path_removes_session() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+        let initial_count = state.visible_count();
+
+        // Get the path of the first session (second item, after project)
+        state.select_next();
+        let session = state.selected_session().unwrap();
+        let path = session.path.clone();
+
+        // Remove the session
+        state.remove_session_by_path(&path);
+
+        // Count should decrease by 1
+        assert_eq!(state.visible_count(), initial_count - 1);
+    }
+
+    #[test]
+    fn test_remove_session_by_path_nonexistent_path() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+        let initial_count = state.visible_count();
+
+        // Try to remove a non-existent path
+        let fake_path = PathBuf::from("/nonexistent/path.jsonl");
+        state.remove_session_by_path(&fake_path);
+
+        // Count should remain unchanged
+        assert_eq!(state.visible_count(), initial_count);
+    }
+
+    #[test]
+    fn test_remove_session_by_path_removes_empty_project() {
+        // Create sessions with only one session per project
+        let sessions = vec![SessionMeta::new(
+            "only_session",
+            PathBuf::from("/home/user/.claude/projects/single/only.jsonl"),
+            "~/projects/single",
+            test_timestamp(),
+        )
+        .with_message_count(5)];
+
+        let mut state = SessionListState::from_sessions(sessions);
+        // Should have 1 project + 1 session = 2 items
+        assert_eq!(state.visible_count(), 2);
+
+        // Get the session path
+        state.select_next();
+        let session = state.selected_session().unwrap();
+        let path = session.path.clone();
+
+        // Remove the only session
+        state.remove_session_by_path(&path);
+
+        // Both session and empty project should be removed
+        assert_eq!(state.visible_count(), 0);
+    }
+
+    #[test]
+    fn test_remove_session_by_path_adjusts_selection() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+
+        // Select the last item
+        state.select_last();
+        let last_idx = state.selected();
+
+        // Get the path of the last session
+        let session = state.selected_session().unwrap();
+        let path = session.path.clone();
+
+        // Remove the last session
+        state.remove_session_by_path(&path);
+
+        // Selection should be adjusted (not out of bounds)
+        assert!(state.selected() < state.visible_count());
+        // Selection should have moved to previous item
+        assert!(state.selected() <= last_idx);
+    }
+
+    #[test]
+    fn test_remove_session_by_path_updates_project_count() {
+        let mut state = SessionListState::from_sessions(sample_sessions());
+
+        // First project (~/projects/api) has 2 sessions
+        if let TreeItem::Project { session_count, .. } = &state.items()[0] {
+            assert_eq!(*session_count, 2);
+        }
+
+        // Remove one session from the first project
+        state.select_next(); // Select first session
+        let session = state.selected_session().unwrap();
+        let path = session.path.clone();
+        state.remove_session_by_path(&path);
+
+        // Project count should be updated
+        if let TreeItem::Project { session_count, .. } = &state.items()[0] {
+            assert_eq!(*session_count, 1);
+        }
     }
 }

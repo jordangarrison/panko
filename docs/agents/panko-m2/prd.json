@@ -210,7 +210,7 @@
       "title": "Session deletion with confirmation",
       "description": "Allow deleting sessions from TUI with safety confirmation",
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "d key initiates delete for selected session",
         "Confirmation dialog: 'Delete session abc123? (y/N)'",

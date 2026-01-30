@@ -3,8 +3,8 @@
 use crate::scanner::{ScannerRegistry, SessionMeta};
 use crate::tui::actions::Action;
 use crate::tui::widgets::{
-    HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect, ProviderSelectState, SessionList,
-    SessionListState, SortOrder,
+    ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
+    ProviderSelectState, SessionList, SessionListState, SortOrder,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -104,6 +104,21 @@ pub enum RefreshState {
     Refreshing,
 }
 
+/// State of the delete confirmation dialog.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ConfirmationState {
+    /// No confirmation dialog is showing.
+    #[default]
+    Inactive,
+    /// Confirming deletion of a session.
+    ConfirmingDelete {
+        /// The session file path to delete.
+        session_path: PathBuf,
+        /// The session ID for display.
+        session_id: String,
+    },
+}
+
 impl RefreshState {
     /// Check if refresh is in progress.
     pub fn is_refreshing(&self) -> bool {
@@ -140,6 +155,8 @@ pub struct App {
     show_help: bool,
     /// Current refresh state
     refresh_state: RefreshState,
+    /// Current confirmation state (for delete dialog)
+    confirmation_state: ConfirmationState,
 }
 
 impl Default for App {
@@ -165,6 +182,7 @@ impl App {
             status_message: None,
             show_help: false,
             refresh_state: RefreshState::default(),
+            confirmation_state: ConfirmationState::default(),
         }
     }
 
@@ -184,6 +202,7 @@ impl App {
             status_message: None,
             show_help: false,
             refresh_state: RefreshState::default(),
+            confirmation_state: ConfirmationState::default(),
         }
     }
 
@@ -281,6 +300,11 @@ impl App {
             return self.handle_sharing_key(key_event);
         }
 
+        // Handle confirmation dialog (delete confirmation)
+        if self.is_confirming() {
+            return self.handle_confirmation_key(key_event);
+        }
+
         // Handle search mode input
         if self.search_active {
             return self.handle_search_key(key_event);
@@ -366,6 +390,18 @@ impl App {
             // Sort: S (shift+s) to cycle sort order
             KeyCode::Char('S') => {
                 self.session_list_state.cycle_sort_order();
+            }
+            // Delete: d to delete selected session (with confirmation)
+            KeyCode::Char('d') => {
+                // Cannot delete while sharing is active
+                if self.sharing_state.is_active() {
+                    self.set_status_message("✗ Cannot delete while sharing is active");
+                } else if let Some(session) = self.selected_session() {
+                    self.confirmation_state = ConfirmationState::ConfirmingDelete {
+                        session_path: session.path.clone(),
+                        session_id: session.id.clone(),
+                    };
+                }
             }
             // Help: ? to show keyboard shortcuts
             KeyCode::Char('?') => {
@@ -527,6 +563,10 @@ impl App {
                 self.sharing_state = SharingState::Stopping;
                 self.pending_action = Action::StopSharing;
             }
+            // Delete is blocked while sharing
+            KeyCode::Char('d') => {
+                self.set_status_message("✗ Cannot delete while sharing is active");
+            }
             // Navigation still works while sharing
             KeyCode::Char('j') | KeyCode::Down
                 if self.focused_panel == FocusedPanel::SessionList =>
@@ -627,6 +667,46 @@ impl App {
         self.status_message.as_deref()
     }
 
+    /// Check if a confirmation dialog is showing.
+    pub fn is_confirming(&self) -> bool {
+        !matches!(self.confirmation_state, ConfirmationState::Inactive)
+    }
+
+    /// Get the current confirmation state.
+    pub fn confirmation_state(&self) -> &ConfirmationState {
+        &self.confirmation_state
+    }
+
+    /// Cancel any active confirmation dialog.
+    pub fn cancel_confirmation(&mut self) {
+        self.confirmation_state = ConfirmationState::Inactive;
+    }
+
+    /// Handle key events when a confirmation dialog is showing.
+    fn handle_confirmation_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // y or Y confirms the action
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let ConfirmationState::ConfirmingDelete { session_path, .. } =
+                    &self.confirmation_state
+                {
+                    self.pending_action = Action::DeleteSession(session_path.clone());
+                }
+                self.confirmation_state = ConfirmationState::Inactive;
+            }
+            // Any other key cancels (n, N, Esc, or any key)
+            _ => {
+                self.confirmation_state = ConfirmationState::Inactive;
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove a session from the list by its file path.
+    pub fn remove_session_by_path(&mut self, path: &PathBuf) {
+        self.session_list_state.remove_session_by_path(path);
+    }
+
     /// Check if the terminal size is too small.
     fn is_too_small(&self, area: Rect) -> bool {
         area.width < MIN_WIDTH || area.height < MIN_HEIGHT
@@ -664,6 +744,11 @@ impl App {
             self.render_provider_select_popup(frame, area);
         }
 
+        // Render confirmation dialog if confirming
+        if self.is_confirming() {
+            self.render_confirmation_dialog(frame, area);
+        }
+
         // Render help overlay if visible
         if self.show_help {
             self.render_help_overlay(frame, area);
@@ -680,6 +765,14 @@ impl App {
     fn render_help_overlay(&self, frame: &mut Frame, area: Rect) {
         let widget = HelpOverlay::new();
         frame.render_widget(widget, area);
+    }
+
+    /// Render the confirmation dialog.
+    fn render_confirmation_dialog(&self, frame: &mut Frame, area: Rect) {
+        if let ConfirmationState::ConfirmingDelete { session_id, .. } = &self.confirmation_state {
+            let widget = ConfirmationDialog::delete_session(session_id);
+            frame.render_widget(widget, area);
+        }
     }
 
     /// Render message when terminal is too small.
@@ -2097,5 +2190,194 @@ mod tests {
         app.set_focused_panel(FocusedPanel::Preview);
         app.handle_key_event(key_event(KeyCode::Char('r'))).unwrap();
         assert!(app.is_running());
+    }
+
+    // Tests for deletion functionality
+
+    #[test]
+    fn test_confirmation_state_default_is_inactive() {
+        let app = App::new();
+        assert!(!app.is_confirming());
+        assert!(matches!(
+            app.confirmation_state(),
+            ConfirmationState::Inactive
+        ));
+    }
+
+    #[test]
+    fn test_handle_key_d_triggers_confirmation_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'd' to delete
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+
+        // Should be in confirmation state
+        assert!(app.is_confirming());
+        assert!(matches!(
+            app.confirmation_state(),
+            ConfirmationState::ConfirmingDelete { .. }
+        ));
+    }
+
+    #[test]
+    fn test_handle_key_d_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // First item is a project, not a session
+        assert!(app.selected_session().is_none());
+
+        // Press 'd' on project
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+
+        // Should not be in confirmation state
+        assert!(!app.is_confirming());
+    }
+
+    #[test]
+    fn test_handle_key_d_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'd' with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+
+        // Should not be in confirmation state
+        assert!(!app.is_confirming());
+    }
+
+    #[test]
+    fn test_handle_key_d_blocked_while_sharing() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+
+        // Press 'd' while sharing is active
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+
+        // Should show status message and NOT be in confirmation state
+        assert!(!app.is_confirming());
+        assert!(app.status_message().is_some());
+        assert!(app
+            .status_message()
+            .unwrap()
+            .contains("Cannot delete while sharing"));
+    }
+
+    #[test]
+    fn test_confirmation_y_triggers_delete_action() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Enter confirmation state
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(app.is_confirming());
+
+        // Press 'y' to confirm
+        app.handle_key_event(key_event(KeyCode::Char('y'))).unwrap();
+
+        // Should have DeleteSession action and exit confirmation state
+        assert!(!app.is_confirming());
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::DeleteSession(_)));
+    }
+
+    #[test]
+    fn test_confirmation_upper_y_triggers_delete_action() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Enter confirmation state
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(app.is_confirming());
+
+        // Press 'Y' to confirm
+        app.handle_key_event(key_event(KeyCode::Char('Y'))).unwrap();
+
+        // Should have DeleteSession action
+        assert!(!app.is_confirming());
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::DeleteSession(_)));
+    }
+
+    #[test]
+    fn test_confirmation_n_cancels() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Enter confirmation state
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(app.is_confirming());
+
+        // Press 'n' to cancel
+        app.handle_key_event(key_event(KeyCode::Char('n'))).unwrap();
+
+        // Should exit confirmation state without action
+        assert!(!app.is_confirming());
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_confirmation_esc_cancels() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Enter confirmation state
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(app.is_confirming());
+
+        // Press Esc to cancel
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+
+        // Should exit confirmation state without action
+        assert!(!app.is_confirming());
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_confirmation_any_key_cancels() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Enter confirmation state
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(app.is_confirming());
+
+        // Press any other key to cancel (like 'x')
+        app.handle_key_event(key_event(KeyCode::Char('x'))).unwrap();
+
+        // Should exit confirmation state without action
+        assert!(!app.is_confirming());
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_cancel_confirmation_method() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Enter confirmation state
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(app.is_confirming());
+
+        // Cancel via method
+        app.cancel_confirmation();
+
+        assert!(!app.is_confirming());
+    }
+
+    #[test]
+    fn test_remove_session_by_path() {
+        let mut app = App::with_sessions(sample_sessions());
+        let initial_count = app.session_list_state().visible_count();
+
+        // Get the path of a session
+        app.session_list_state_mut().select_next(); // Move to first session
+        let session_path = app.selected_session().unwrap().path.clone();
+
+        // Remove the session
+        app.remove_session_by_path(&session_path);
+
+        // Session count should decrease
+        assert!(app.session_list_state().visible_count() < initial_count);
     }
 }
