@@ -47,6 +47,7 @@ pub fn get_shortcut_categories() -> Vec<ShortcutCategory> {
                 ("c", "Copy session path"),
                 ("o", "Open folder"),
                 ("r", "Refresh list"),
+                ("S", "Cycle sort order"),
             ],
         },
         ShortcutCategory {

@@ -14,7 +14,86 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, StatefulWidget, Widget},
 };
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+/// Sort order for sessions in the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortOrder {
+    /// Sort by date, newest first (default).
+    #[default]
+    DateNewest,
+    /// Sort by date, oldest first.
+    DateOldest,
+    /// Sort by message count, highest first.
+    MessageCount,
+    /// Sort by project name, alphabetically.
+    ProjectName,
+}
+
+impl SortOrder {
+    /// Cycle to the next sort order.
+    pub fn next(&self) -> Self {
+        match self {
+            SortOrder::DateNewest => SortOrder::DateOldest,
+            SortOrder::DateOldest => SortOrder::MessageCount,
+            SortOrder::MessageCount => SortOrder::ProjectName,
+            SortOrder::ProjectName => SortOrder::DateNewest,
+        }
+    }
+
+    /// Get a display name for the sort order.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            SortOrder::DateNewest => "Date (newest)",
+            SortOrder::DateOldest => "Date (oldest)",
+            SortOrder::MessageCount => "Messages",
+            SortOrder::ProjectName => "Project",
+        }
+    }
+
+    /// Get a short name for the sort order (for header display).
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            SortOrder::DateNewest => "↓ Date",
+            SortOrder::DateOldest => "↑ Date",
+            SortOrder::MessageCount => "# Msgs",
+            SortOrder::ProjectName => "A-Z",
+        }
+    }
+
+    /// Parse from a string representation (for config loading).
+    ///
+    /// Note: We don't implement `std::str::FromStr` because we want to return
+    /// `Option<Self>` rather than `Result<Self, Error>` for simpler usage.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "date_newest" | "datenewest" | "newest" => Some(SortOrder::DateNewest),
+            "date_oldest" | "dateoldest" | "oldest" => Some(SortOrder::DateOldest),
+            "message_count" | "messagecount" | "messages" => Some(SortOrder::MessageCount),
+            "project_name" | "projectname" | "project" => Some(SortOrder::ProjectName),
+            _ => None,
+        }
+    }
+
+    /// Alias for `parse` for backward compatibility.
+    #[inline]
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        Self::parse(s)
+    }
+
+    /// Convert to a string representation (for config saving).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SortOrder::DateNewest => "date_newest",
+            SortOrder::DateOldest => "date_oldest",
+            SortOrder::MessageCount => "message_count",
+            SortOrder::ProjectName => "project_name",
+        }
+    }
+}
 
 /// A tree item representing either a project folder or a session.
 #[derive(Debug, Clone, PartialEq)]
@@ -148,6 +227,8 @@ pub struct SessionListState {
     search_matches: Vec<SearchMatch>,
     /// Original sessions for rebuilding after search clears.
     original_sessions: Vec<SessionMeta>,
+    /// Current sort order for sessions.
+    sort_order: SortOrder,
 }
 
 impl SessionListState {
@@ -156,35 +237,18 @@ impl SessionListState {
         Self::default()
     }
 
-    /// Build the tree from a list of session metadata.
+    /// Build the tree from a list of session metadata with the default sort order.
     pub fn from_sessions(sessions: Vec<SessionMeta>) -> Self {
+        Self::from_sessions_with_sort(sessions, SortOrder::default())
+    }
+
+    /// Build the tree from a list of session metadata with a specific sort order.
+    pub fn from_sessions_with_sort(sessions: Vec<SessionMeta>, sort_order: SortOrder) -> Self {
         // Store original sessions for filtering later
         let original_sessions = sessions.clone();
 
-        // Group sessions by project path
-        let mut by_project: BTreeMap<String, Vec<SessionMeta>> = BTreeMap::new();
-        for session in sessions {
-            by_project
-                .entry(session.project_path.clone())
-                .or_default()
-                .push(session);
-        }
-
-        // Build tree items
-        let mut items = Vec::new();
-        for (project_path, mut project_sessions) in by_project {
-            // Sort sessions by updated_at (newest first)
-            project_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-
-            // Add project header
-            let session_count = project_sessions.len();
-            items.push(TreeItem::project(project_path, session_count));
-
-            // Add sessions under this project
-            for session in project_sessions {
-                items.push(TreeItem::session(session));
-            }
-        }
+        // Build items using the sort order
+        let items = Self::build_sorted_items(&sessions, sort_order);
 
         let mut state = Self {
             items,
@@ -194,9 +258,105 @@ impl SessionListState {
             search_query: String::new(),
             search_matches: Vec::new(),
             original_sessions,
+            sort_order,
         };
         state.rebuild_visible_indices();
         state
+    }
+
+    /// Build sorted tree items from sessions.
+    fn build_sorted_items(sessions: &[SessionMeta], sort_order: SortOrder) -> Vec<TreeItem> {
+        // Group sessions by project path
+        let mut by_project: BTreeMap<String, Vec<SessionMeta>> = BTreeMap::new();
+        for session in sessions {
+            by_project
+                .entry(session.project_path.clone())
+                .or_default()
+                .push(session.clone());
+        }
+
+        // Collect project names for sorting
+        let mut project_names: Vec<String> = by_project.keys().cloned().collect();
+
+        // Sort project names based on sort order
+        match sort_order {
+            SortOrder::ProjectName => {
+                // Alphabetical order for projects
+                project_names.sort();
+            }
+            SortOrder::DateNewest => {
+                // Sort projects by their newest session
+                project_names.sort_by(|a, b| {
+                    let a_newest = by_project
+                        .get(a)
+                        .and_then(|s| s.iter().map(|s| s.updated_at).max());
+                    let b_newest = by_project
+                        .get(b)
+                        .and_then(|s| s.iter().map(|s| s.updated_at).max());
+                    b_newest.cmp(&a_newest) // Descending (newest first)
+                });
+            }
+            SortOrder::DateOldest => {
+                // Sort projects by their oldest session
+                project_names.sort_by(|a, b| {
+                    let a_oldest = by_project
+                        .get(a)
+                        .and_then(|s| s.iter().map(|s| s.updated_at).min());
+                    let b_oldest = by_project
+                        .get(b)
+                        .and_then(|s| s.iter().map(|s| s.updated_at).min());
+                    a_oldest.cmp(&b_oldest) // Ascending (oldest first)
+                });
+            }
+            SortOrder::MessageCount => {
+                // Sort projects by total message count
+                project_names.sort_by(|a, b| {
+                    let a_total: usize = by_project
+                        .get(a)
+                        .map(|s| s.iter().map(|s| s.message_count).sum())
+                        .unwrap_or(0);
+                    let b_total: usize = by_project
+                        .get(b)
+                        .map(|s| s.iter().map(|s| s.message_count).sum())
+                        .unwrap_or(0);
+                    b_total.cmp(&a_total) // Descending (most messages first)
+                });
+            }
+        }
+
+        // Build tree items in sorted order
+        let mut items = Vec::new();
+        for project_path in project_names {
+            if let Some(mut project_sessions) = by_project.remove(&project_path) {
+                // Sort sessions within each project based on sort order
+                match sort_order {
+                    SortOrder::DateNewest => {
+                        project_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                    }
+                    SortOrder::DateOldest => {
+                        project_sessions.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
+                    }
+                    SortOrder::MessageCount => {
+                        project_sessions.sort_by(|a, b| b.message_count.cmp(&a.message_count));
+                    }
+                    SortOrder::ProjectName => {
+                        // Within a project, still sort by newest when sorted by project name
+                        project_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                    }
+                }
+
+                // Add project header
+                let session_count = project_sessions.len();
+                items.push(TreeItem::project(project_path, session_count));
+
+                // Add sessions under this project
+                for session in project_sessions {
+                    items.push(TreeItem::session(session));
+                }
+            }
+        }
+
+        items
     }
 
     /// Rebuild the list of visible item indices.
@@ -402,6 +562,44 @@ impl SessionListState {
         &self.items
     }
 
+    // === Sort Order Methods ===
+
+    /// Get the current sort order.
+    pub fn sort_order(&self) -> SortOrder {
+        self.sort_order
+    }
+
+    /// Set the sort order and re-sort the items.
+    pub fn set_sort_order(&mut self, sort_order: SortOrder) {
+        if self.sort_order == sort_order {
+            return;
+        }
+
+        // Remember current selection
+        let selected_session_id = self.selected_session().map(|s| s.id.clone());
+
+        self.sort_order = sort_order;
+
+        // Rebuild items with new sort order
+        self.items = Self::build_sorted_items(&self.original_sessions, sort_order);
+        self.rebuild_visible_indices();
+
+        // Try to restore selection
+        if let Some(session_id) = selected_session_id {
+            self.select_session_by_id(&session_id);
+        } else {
+            // Reset selection if no session was selected
+            self.selected = 0;
+        }
+        self.offset = 0;
+    }
+
+    /// Cycle to the next sort order.
+    pub fn cycle_sort_order(&mut self) {
+        let next_order = self.sort_order.next();
+        self.set_sort_order(next_order);
+    }
+
     // === Fuzzy Search Methods ===
 
     /// Get the current search query.
@@ -439,8 +637,10 @@ impl SessionListState {
         self.search_query.clear();
         self.search_matches.clear();
 
-        // Rebuild items from original sessions
-        *self = Self::from_sessions(std::mem::take(&mut self.original_sessions));
+        // Rebuild items from original sessions, preserving sort order
+        let sort_order = self.sort_order;
+        *self =
+            Self::from_sessions_with_sort(std::mem::take(&mut self.original_sessions), sort_order);
     }
 
     /// Perform the fuzzy search and update the view.
@@ -1216,5 +1416,284 @@ mod tests {
 
         // Selection should be preserved
         assert_eq!(state.selected(), selection_before);
+    }
+
+    // === Sort Order Tests ===
+
+    fn sessions_for_sorting() -> Vec<SessionMeta> {
+        let t1 = DateTime::parse_from_rfc3339("2024-01-15T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let t2 = DateTime::parse_from_rfc3339("2024-01-15T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let t3 = DateTime::parse_from_rfc3339("2024-01-14T08:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        vec![
+            SessionMeta::new(
+                "session1",
+                PathBuf::from("/home/user/.claude/projects/api/session1.jsonl"),
+                "~/projects/api",
+                t1,
+            )
+            .with_message_count(10),
+            SessionMeta::new(
+                "session2",
+                PathBuf::from("/home/user/.claude/projects/api/session2.jsonl"),
+                "~/projects/api",
+                t2,
+            )
+            .with_message_count(30),
+            SessionMeta::new(
+                "session3",
+                PathBuf::from("/home/user/.claude/projects/web/session3.jsonl"),
+                "~/projects/web",
+                t3,
+            )
+            .with_message_count(5),
+        ]
+    }
+
+    #[test]
+    fn test_sort_order_default_is_date_newest() {
+        assert_eq!(SortOrder::default(), SortOrder::DateNewest);
+    }
+
+    #[test]
+    fn test_sort_order_next_cycles() {
+        let order = SortOrder::DateNewest;
+        assert_eq!(order.next(), SortOrder::DateOldest);
+        assert_eq!(order.next().next(), SortOrder::MessageCount);
+        assert_eq!(order.next().next().next(), SortOrder::ProjectName);
+        assert_eq!(order.next().next().next().next(), SortOrder::DateNewest);
+    }
+
+    #[test]
+    fn test_sort_order_display_name() {
+        assert_eq!(SortOrder::DateNewest.display_name(), "Date (newest)");
+        assert_eq!(SortOrder::DateOldest.display_name(), "Date (oldest)");
+        assert_eq!(SortOrder::MessageCount.display_name(), "Messages");
+        assert_eq!(SortOrder::ProjectName.display_name(), "Project");
+    }
+
+    #[test]
+    fn test_sort_order_short_name() {
+        assert_eq!(SortOrder::DateNewest.short_name(), "↓ Date");
+        assert_eq!(SortOrder::DateOldest.short_name(), "↑ Date");
+        assert_eq!(SortOrder::MessageCount.short_name(), "# Msgs");
+        assert_eq!(SortOrder::ProjectName.short_name(), "A-Z");
+    }
+
+    #[test]
+    fn test_sort_order_from_str() {
+        assert_eq!(
+            SortOrder::from_str("date_newest"),
+            Some(SortOrder::DateNewest)
+        );
+        assert_eq!(SortOrder::from_str("newest"), Some(SortOrder::DateNewest));
+        assert_eq!(
+            SortOrder::from_str("date_oldest"),
+            Some(SortOrder::DateOldest)
+        );
+        assert_eq!(SortOrder::from_str("oldest"), Some(SortOrder::DateOldest));
+        assert_eq!(
+            SortOrder::from_str("message_count"),
+            Some(SortOrder::MessageCount)
+        );
+        assert_eq!(
+            SortOrder::from_str("messages"),
+            Some(SortOrder::MessageCount)
+        );
+        assert_eq!(
+            SortOrder::from_str("project_name"),
+            Some(SortOrder::ProjectName)
+        );
+        assert_eq!(SortOrder::from_str("project"), Some(SortOrder::ProjectName));
+        assert_eq!(SortOrder::from_str("invalid"), None);
+    }
+
+    #[test]
+    fn test_sort_order_as_str() {
+        assert_eq!(SortOrder::DateNewest.as_str(), "date_newest");
+        assert_eq!(SortOrder::DateOldest.as_str(), "date_oldest");
+        assert_eq!(SortOrder::MessageCount.as_str(), "message_count");
+        assert_eq!(SortOrder::ProjectName.as_str(), "project_name");
+    }
+
+    #[test]
+    fn test_state_default_sort_order() {
+        let state = SessionListState::from_sessions(sessions_for_sorting());
+        assert_eq!(state.sort_order(), SortOrder::DateNewest);
+    }
+
+    #[test]
+    fn test_state_from_sessions_with_sort() {
+        let state = SessionListState::from_sessions_with_sort(
+            sessions_for_sorting(),
+            SortOrder::DateOldest,
+        );
+        assert_eq!(state.sort_order(), SortOrder::DateOldest);
+    }
+
+    #[test]
+    fn test_state_set_sort_order() {
+        let mut state = SessionListState::from_sessions(sessions_for_sorting());
+        assert_eq!(state.sort_order(), SortOrder::DateNewest);
+
+        state.set_sort_order(SortOrder::MessageCount);
+        assert_eq!(state.sort_order(), SortOrder::MessageCount);
+    }
+
+    #[test]
+    fn test_state_cycle_sort_order() {
+        let mut state = SessionListState::from_sessions(sessions_for_sorting());
+        assert_eq!(state.sort_order(), SortOrder::DateNewest);
+
+        state.cycle_sort_order();
+        assert_eq!(state.sort_order(), SortOrder::DateOldest);
+
+        state.cycle_sort_order();
+        assert_eq!(state.sort_order(), SortOrder::MessageCount);
+
+        state.cycle_sort_order();
+        assert_eq!(state.sort_order(), SortOrder::ProjectName);
+
+        state.cycle_sort_order();
+        assert_eq!(state.sort_order(), SortOrder::DateNewest);
+    }
+
+    #[test]
+    fn test_sort_date_newest_order() {
+        let state = SessionListState::from_sessions_with_sort(
+            sessions_for_sorting(),
+            SortOrder::DateNewest,
+        );
+
+        // First project should be the one with the newest session (api has t2)
+        let items = state.items();
+        if let TreeItem::Project { path, .. } = &items[0] {
+            assert_eq!(path, "~/projects/api");
+        } else {
+            panic!("Expected project at index 0");
+        }
+
+        // First session under api should be session2 (newest)
+        if let TreeItem::Session(meta) = &items[1] {
+            assert_eq!(meta.id, "session2");
+        } else {
+            panic!("Expected session at index 1");
+        }
+    }
+
+    #[test]
+    fn test_sort_date_oldest_order() {
+        let state = SessionListState::from_sessions_with_sort(
+            sessions_for_sorting(),
+            SortOrder::DateOldest,
+        );
+
+        // First project should be web (has oldest session at t3)
+        let items = state.items();
+        if let TreeItem::Project { path, .. } = &items[0] {
+            assert_eq!(path, "~/projects/web");
+        } else {
+            panic!("Expected project at index 0");
+        }
+    }
+
+    #[test]
+    fn test_sort_message_count_order() {
+        let state = SessionListState::from_sessions_with_sort(
+            sessions_for_sorting(),
+            SortOrder::MessageCount,
+        );
+
+        // First project should be api (has 40 total messages)
+        let items = state.items();
+        if let TreeItem::Project { path, .. } = &items[0] {
+            assert_eq!(path, "~/projects/api");
+        } else {
+            panic!("Expected project at index 0");
+        }
+
+        // First session under api should be session2 (30 msgs > 10 msgs)
+        if let TreeItem::Session(meta) = &items[1] {
+            assert_eq!(meta.id, "session2");
+        } else {
+            panic!("Expected session at index 1");
+        }
+    }
+
+    #[test]
+    fn test_sort_project_name_alphabetical() {
+        let state = SessionListState::from_sessions_with_sort(
+            sessions_for_sorting(),
+            SortOrder::ProjectName,
+        );
+
+        // First project should be api (alphabetically before web)
+        let items = state.items();
+        if let TreeItem::Project { path, .. } = &items[0] {
+            assert_eq!(path, "~/projects/api");
+        } else {
+            panic!("Expected project at index 0");
+        }
+
+        // Second project should be web
+        // Find the second project
+        for item in items.iter().skip(1) {
+            if let TreeItem::Project { path, .. } = item {
+                assert_eq!(path, "~/projects/web");
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn test_set_sort_order_same_order_no_change() {
+        let mut state = SessionListState::from_sessions(sessions_for_sorting());
+        state.select_next(); // Move selection
+        let selection_before = state.selected();
+
+        // Setting the same sort order should not change anything
+        state.set_sort_order(SortOrder::DateNewest);
+
+        assert_eq!(state.selected(), selection_before);
+    }
+
+    #[test]
+    fn test_sort_preserves_selection_by_session_id() {
+        let mut state = SessionListState::from_sessions(sessions_for_sorting());
+
+        // Select a specific session
+        state.select_session_by_id("session3");
+        let selected = state.selected_session().unwrap();
+        assert_eq!(selected.id, "session3");
+
+        // Change sort order
+        state.set_sort_order(SortOrder::MessageCount);
+
+        // Selection should still be on the same session
+        let selected_after = state.selected_session().unwrap();
+        assert_eq!(selected_after.id, "session3");
+    }
+
+    #[test]
+    fn test_clear_search_preserves_sort_order() {
+        let mut state = SessionListState::from_sessions_with_sort(
+            sessions_for_sorting(),
+            SortOrder::MessageCount,
+        );
+
+        // Apply search
+        state.set_search_query("api");
+
+        // Clear search
+        state.clear_search();
+
+        // Sort order should be preserved
+        assert_eq!(state.sort_order(), SortOrder::MessageCount);
     }
 }

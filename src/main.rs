@@ -391,12 +391,25 @@ async fn main() -> Result<()> {
 
 /// Run the TUI application.
 fn run_tui() -> Result<()> {
+    // Load configuration
+    let mut config = Config::load().unwrap_or_default();
+
     // Create application state and load sessions
     let mut app = tui::App::new();
     if let Err(e) = app.load_sessions() {
         // Log warning but continue - user can still refresh
         eprintln!("Warning: Failed to load sessions: {}", e);
     }
+
+    // Apply sort order from config
+    if let Some(ref sort_str) = config.default_sort {
+        if let Some(sort_order) = tui::SortOrder::from_str(sort_str) {
+            app.set_sort_order(sort_order);
+        }
+    }
+
+    // Track initial sort order to detect changes
+    let initial_sort_order = app.sort_order();
 
     // Track the active sharing handle (if any)
     let mut sharing_handle: Option<tui::SharingHandle> = None;
@@ -419,6 +432,16 @@ fn run_tui() -> Result<()> {
                 if let Some(handle) = sharing_handle.take() {
                     handle.stop();
                 }
+
+                // Save sort order if changed
+                let final_sort_order = app.sort_order();
+                if final_sort_order != initial_sort_order {
+                    config.set_default_sort(Some(final_sort_order.as_str().to_string()));
+                    if let Err(e) = config.save() {
+                        eprintln!("Warning: Failed to save config: {}", e);
+                    }
+                }
+
                 break;
             }
             Ok(tui::RunResult::Continue) => {
@@ -684,9 +707,25 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                         println!("Set default_port = {}", port);
                     }
                 }
+                "default_sort" => {
+                    if value.is_empty() {
+                        config.set_default_sort(None);
+                        println!("Unset default_sort");
+                    } else {
+                        // Validate sort option
+                        if tui::SortOrder::from_str(&value).is_none() {
+                            anyhow::bail!(
+                                "Invalid sort option '{}'. Valid options: date_newest, date_oldest, message_count, project_name",
+                                value
+                            );
+                        }
+                        config.set_default_sort(Some(value.clone()));
+                        println!("Set default_sort = \"{}\"", value);
+                    }
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
                         key
                     );
                 }
@@ -710,9 +749,13 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                     config.set_default_port(None);
                     println!("Unset default_port");
                 }
+                "default_sort" => {
+                    config.set_default_sort(None);
+                    println!("Unset default_sort");
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
                         key
                     );
                 }

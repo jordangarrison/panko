@@ -15,7 +15,7 @@ pub use app::{App, AppResult, FocusedPanel, RefreshState, SharingState, MIN_HEIG
 pub use events::{Event, EventHandler};
 pub use sharing::{SharingCommand, SharingHandle, SharingMessage};
 pub use watcher::{FileWatcher, WatcherMessage};
-pub use widgets::{ProviderOption, SessionList, SessionListState, TreeItem};
+pub use widgets::{ProviderOption, SessionList, SessionListState, SortOrder, TreeItem};
 
 use std::io;
 use std::panic;

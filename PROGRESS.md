@@ -1,5 +1,97 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 12: Sorting options
+
+### Summary
+Implemented sorting options for the session list. Users can now cycle through different sort orders using the `S` key. Sort preference is persisted in the config file.
+
+### Changes
+- Updated `src/tui/widgets/session_list.rs`:
+  - Added `SortOrder` enum with variants: DateNewest, DateOldest, MessageCount, ProjectName
+  - Implemented `next()` for cycling through sort orders
+  - Implemented `display_name()` and `short_name()` for UI display
+  - Implemented `parse()` and `from_str()` for string conversion
+  - Implemented `as_str()` for config serialization
+  - Added `sort_order` field to `SessionListState`
+  - Added `from_sessions_with_sort()` constructor
+  - Added `build_sorted_items()` to build tree with specific sort order
+  - Added `sort_order()`, `set_sort_order()`, and `cycle_sort_order()` methods
+  - Updated `clear_search()` to preserve sort order
+  - 22 new unit tests for sorting functionality
+
+- Updated `src/tui/app.rs`:
+  - Added `S` key handler to cycle sort order
+  - Added `sort_order()` and `set_sort_order()` accessor methods
+  - Updated `render_header()` to show sort indicator `[S] ↓ Date` in magenta
+
+- Updated `src/tui/widgets/help.rs`:
+  - Added `S` key to the Actions section: "Cycle sort order"
+
+- Updated `src/tui/widgets/mod.rs`:
+  - Added `SortOrder` to exports
+
+- Updated `src/tui/mod.rs`:
+  - Added `SortOrder` to exports
+
+- Updated `src/config.rs`:
+  - Added `default_sort` field to `Config` struct
+  - Added `set_default_sort()` setter method
+  - Updated `is_empty()` to check default_sort
+  - Updated `format_config()` to display default_sort
+  - 5 new unit tests for sort configuration
+
+- Updated `src/main.rs`:
+  - `run_tui()` loads sort order from config on startup
+  - `run_tui()` saves sort order to config if changed on exit
+  - Added `default_sort` handling to `handle_config_command()`
+  - Supports `config set default_sort <value>` and `config unset default_sort`
+
+### Test Coverage (27 new tests)
+SortOrder tests:
+- `test_sort_order_default_is_date_newest` - default is DateNewest
+- `test_sort_order_next_cycles` - cycles through all options
+- `test_sort_order_display_name` - display names correct
+- `test_sort_order_short_name` - short names correct
+- `test_sort_order_from_str` - parsing from strings
+- `test_sort_order_as_str` - serialization to strings
+
+SessionListState sorting tests:
+- `test_state_default_sort_order` - default state uses DateNewest
+- `test_state_from_sessions_with_sort` - constructor with sort order
+- `test_state_set_sort_order` - setting sort order
+- `test_state_cycle_sort_order` - cycling through orders
+- `test_sort_date_newest_order` - newest first sorting
+- `test_sort_date_oldest_order` - oldest first sorting
+- `test_sort_message_count_order` - message count sorting
+- `test_sort_project_name_alphabetical` - alphabetical project sorting
+- `test_set_sort_order_same_order_no_change` - no-op for same order
+- `test_sort_preserves_selection_by_session_id` - selection preserved
+- `test_clear_search_preserves_sort_order` - sort preserved after search clear
+
+Config tests:
+- `test_default_sort_getter_setter` - getter/setter work
+- `test_default_sort_serialization` - TOML serialization
+- `test_format_config_with_sort` - format output with sort
+- `test_format_config_without_sort` - format output without sort
+- `test_is_empty_with_only_sort` - is_empty checks sort
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (366 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Default sort: by updated_at descending (newest first)
+- [x] S key cycles through sort options
+- [x] Sort options: date (newest), date (oldest), message count, project name
+- [x] Current sort shown in header or status bar
+- [x] Sort preference persisted in config
+
+---
+
 ## 2026-01-30 - M2 Story 11: Refresh and auto-refresh
 
 ### Summary

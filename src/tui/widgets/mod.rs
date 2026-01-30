@@ -10,4 +10,4 @@ mod session_list;
 pub use help::HelpOverlay;
 pub use preview::PreviewPanel;
 pub use provider_select::{ProviderOption, ProviderSelect, ProviderSelectState};
-pub use session_list::{SessionList, SessionListState, TreeItem};
+pub use session_list::{SessionList, SessionListState, SortOrder, TreeItem};

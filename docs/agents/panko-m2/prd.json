@@ -180,7 +180,7 @@
       "title": "Sorting options",
       "description": "Allow sorting sessions by different criteria",
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Default sort: by updated_at descending (newest first)",
         "S key cycles through sort options",

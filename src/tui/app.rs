@@ -4,7 +4,7 @@ use crate::scanner::{ClaudeScanner, SessionMeta, SessionScanner};
 use crate::tui::actions::Action;
 use crate::tui::widgets::{
     HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect, ProviderSelectState, SessionList,
-    SessionListState,
+    SessionListState, SortOrder,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -243,6 +243,16 @@ impl App {
         &self.refresh_state
     }
 
+    /// Get the current sort order.
+    pub fn sort_order(&self) -> SortOrder {
+        self.session_list_state.sort_order()
+    }
+
+    /// Set the sort order.
+    pub fn set_sort_order(&mut self, sort_order: SortOrder) {
+        self.session_list_state.set_sort_order(sort_order);
+    }
+
     /// Returns true if the application is running.
     pub fn is_running(&self) -> bool {
         self.running
@@ -362,6 +372,10 @@ impl App {
             // Refresh: r to reload sessions
             KeyCode::Char('r') => {
                 let _ = self.refresh_sessions();
+            }
+            // Sort: S (shift+s) to cycle sort order
+            KeyCode::Char('S') => {
+                self.session_list_state.cycle_sort_order();
             }
             // Help: ? to show keyboard shortcuts
             KeyCode::Char('?') => {
@@ -736,6 +750,7 @@ impl App {
         let header_chunks = Layout::horizontal([
             Constraint::Length(20), // Session count
             Constraint::Min(10),    // Search area (flexible)
+            Constraint::Length(12), // Sort indicator
             Constraint::Length(10), // Help hint
         ])
         .split(inner);
@@ -791,6 +806,19 @@ impl App {
             header_chunks[1],
         );
 
+        // Sort indicator
+        let sort_text = Line::from(vec![
+            Span::styled("[S] ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.session_list_state.sort_order().short_name(),
+                Style::default().fg(Color::Magenta),
+            ),
+        ]);
+        frame.render_widget(
+            Paragraph::new(sort_text).alignment(Alignment::Center),
+            header_chunks[2],
+        );
+
         // Right: Help hint
         let help_text = Line::from(vec![Span::styled(
             "[?] Help",
@@ -798,7 +826,7 @@ impl App {
         )]);
         frame.render_widget(
             Paragraph::new(help_text).alignment(Alignment::Right),
-            header_chunks[2],
+            header_chunks[3],
         );
     }
 

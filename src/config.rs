@@ -48,6 +48,11 @@ pub struct Config {
     /// Default port for the web server
     #[serde(default)]
     pub default_port: Option<u16>,
+
+    /// Default sort order for TUI session list
+    /// Valid values: date_newest, date_oldest, message_count, project_name
+    #[serde(default)]
+    pub default_sort: Option<String>,
 }
 
 impl Config {
@@ -106,7 +111,10 @@ impl Config {
 
     /// Check if any configuration is set
     pub fn is_empty(&self) -> bool {
-        self.default_provider.is_none() && self.ngrok_token.is_none() && self.default_port.is_none()
+        self.default_provider.is_none()
+            && self.ngrok_token.is_none()
+            && self.default_port.is_none()
+            && self.default_sort.is_none()
     }
 
     /// Set the default tunnel provider
@@ -122,6 +130,11 @@ impl Config {
     /// Set the default port
     pub fn set_default_port(&mut self, port: Option<u16>) {
         self.default_port = port;
+    }
+
+    /// Set the default sort order
+    pub fn set_default_sort(&mut self, sort: Option<String>) {
+        self.default_sort = sort;
     }
 
     /// Get effective port (from config or default)
@@ -158,6 +171,12 @@ pub fn format_config(config: &Config) -> String {
         lines.push(format!("  default_port = {}", port));
     } else {
         lines.push("  default_port = (not set, using 3000)".to_string());
+    }
+
+    if let Some(ref sort) = config.default_sort {
+        lines.push(format!("  default_sort = \"{}\"", sort));
+    } else {
+        lines.push("  default_sort = (not set, using date_newest)".to_string());
     }
 
     lines.join("\n")
@@ -331,5 +350,54 @@ mod tests {
         assert_eq!(loaded.default_provider, Some("tailscale".to_string()));
         assert_eq!(loaded.ngrok_token, Some("test_token".to_string()));
         assert_eq!(loaded.default_port, Some(9000));
+    }
+
+    #[test]
+    fn test_default_sort_getter_setter() {
+        let mut config = Config::new();
+        assert!(config.default_sort.is_none());
+
+        config.set_default_sort(Some("date_newest".to_string()));
+        assert_eq!(config.default_sort, Some("date_newest".to_string()));
+
+        config.set_default_sort(None);
+        assert!(config.default_sort.is_none());
+    }
+
+    #[test]
+    fn test_default_sort_serialization() {
+        let mut config = Config::new();
+        config.set_default_sort(Some("message_count".to_string()));
+
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("default_sort"));
+
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.default_sort, Some("message_count".to_string()));
+    }
+
+    #[test]
+    fn test_format_config_with_sort() {
+        let mut config = Config::new();
+        config.set_default_sort(Some("project_name".to_string()));
+
+        let output = format_config(&config);
+        assert!(output.contains("default_sort = \"project_name\""));
+    }
+
+    #[test]
+    fn test_format_config_without_sort() {
+        let config = Config::new();
+        let output = format_config(&config);
+        assert!(output.contains("default_sort = (not set, using date_newest)"));
+    }
+
+    #[test]
+    fn test_is_empty_with_only_sort() {
+        let mut config = Config::new();
+        assert!(config.is_empty());
+
+        config.set_default_sort(Some("date_oldest".to_string()));
+        assert!(!config.is_empty());
     }
 }
