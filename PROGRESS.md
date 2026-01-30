@@ -1,5 +1,61 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 1: Session scanner trait and Claude implementation
+
+### Summary
+Implemented the session scanner abstraction for discovering sessions without full parsing. This is the first story of Milestone 2 (TUI Browser).
+
+### Changes
+- Created `src/scanner/mod.rs`:
+  - `SessionMeta` struct with id, path, project_path, updated_at, message_count, first_prompt_preview
+  - `SessionScanner` trait with `scan_directory()` and `default_roots()` methods
+  - `ScanError` enum for directory/file/metadata errors
+  - Builder pattern for SessionMeta with `with_message_count()` and `with_first_prompt_preview()`
+
+- Created `src/scanner/claude.rs`:
+  - `ClaudeScanner` struct implementing `SessionScanner` trait
+  - `scan_directory()` scans `~/.claude/projects/` for JSONL files
+  - `scan_session_file()` extracts metadata quickly without full parsing:
+    - Reads first user prompt (truncated to ~100 chars)
+    - Counts user + assistant messages
+    - Gets session ID from filename
+    - Uses file mtime for updated_at
+  - Filters out meta messages, command messages, and tool results
+  - `truncate_prompt()` helper truncates at word boundaries
+  - `default_roots()` returns `~/.claude/projects/`
+
+- Updated `src/lib.rs`:
+  - Added `pub mod scanner;` to export the scanner module
+
+### Test Coverage (20 tests)
+- SessionMeta creation and builders
+- ScanError display formatting
+- ClaudeScanner name and default_roots
+- scan_directory with mock directory structure
+- Message count extraction
+- First prompt extraction and truncation
+- Edge cases: empty files, malformed JSON, meta messages, command messages
+- Tool result handling (not counted as first prompt)
+- Missing directory handling (returns empty, not error)
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (185 tests passed - 165 unit, 20 scanner)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] SessionMeta struct with id, path, project_path, updated_at, message_count, first_prompt_preview
+- [x] SessionScanner trait with scan_directory() and default_roots() methods
+- [x] ClaudeScanner implementation that scans ~/.claude/projects/
+- [x] Extracts metadata quickly without parsing full JSONL content
+- [x] Handles missing/corrupted files gracefully
+- [x] Unit tests with mock directory structure
+
+---
+
 ## 2026-01-30 - Story 14: Check command for validation
 
 ### Summary

@@ -8,7 +8,7 @@
       "title": "Session scanner trait and Claude implementation",
       "description": "Create scanner abstraction for discovering sessions without full parsing",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "SessionMeta struct with id, path, project_path, updated_at, message_count, first_prompt_preview",
         "SessionScanner trait with scan_directory() and default_roots() methods",
