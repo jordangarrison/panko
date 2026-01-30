@@ -6,12 +6,14 @@
 mod actions;
 mod app;
 mod events;
+pub mod sharing;
 pub mod widgets;
 
 pub use actions::Action;
-pub use app::{App, AppResult, FocusedPanel, MIN_HEIGHT, MIN_WIDTH};
+pub use app::{App, AppResult, FocusedPanel, SharingState, MIN_HEIGHT, MIN_WIDTH};
 pub use events::{Event, EventHandler};
-pub use widgets::{SessionList, SessionListState, TreeItem};
+pub use sharing::{SharingCommand, SharingHandle, SharingMessage};
+pub use widgets::{ProviderOption, SessionList, SessionListState, TreeItem};
 
 use std::io;
 use std::panic;

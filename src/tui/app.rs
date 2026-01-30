@@ -2,12 +2,16 @@
 
 use crate::scanner::{ClaudeScanner, SessionMeta, SessionScanner};
 use crate::tui::actions::Action;
-use crate::tui::widgets::{PreviewPanel, SessionList, SessionListState};
+use crate::tui::widgets::{
+    PreviewPanel, ProviderOption, ProviderSelect, ProviderSelectState, SessionList,
+    SessionListState,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
+use std::path::PathBuf;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -36,6 +40,60 @@ impl FocusedPanel {
     }
 }
 
+/// State of the sharing feature.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SharingState {
+    /// Not sharing anything.
+    #[default]
+    Inactive,
+    /// Showing provider selection popup (path to share, available providers).
+    SelectingProvider {
+        /// The session file path to share.
+        session_path: PathBuf,
+    },
+    /// Waiting for the sharing to start (server + tunnel).
+    Starting {
+        /// The session file path being shared.
+        session_path: PathBuf,
+        /// The selected provider name.
+        provider_name: String,
+    },
+    /// Actively sharing with a public URL.
+    Active {
+        /// The public URL where the session is available.
+        public_url: String,
+        /// The provider being used.
+        provider_name: String,
+    },
+    /// Stopping the sharing process.
+    Stopping,
+}
+
+impl SharingState {
+    /// Check if actively sharing.
+    pub fn is_active(&self) -> bool {
+        matches!(self, SharingState::Active { .. })
+    }
+
+    /// Check if a provider selection popup should be shown.
+    pub fn is_selecting_provider(&self) -> bool {
+        matches!(self, SharingState::SelectingProvider { .. })
+    }
+
+    /// Check if any sharing operation is in progress.
+    pub fn is_busy(&self) -> bool {
+        !matches!(self, SharingState::Inactive)
+    }
+
+    /// Get the public URL if actively sharing.
+    pub fn public_url(&self) -> Option<&str> {
+        match self {
+            SharingState::Active { public_url, .. } => Some(public_url),
+            _ => None,
+        }
+    }
+}
+
 /// Application state.
 #[derive(Debug)]
 pub struct App {
@@ -55,6 +113,10 @@ pub struct App {
     search_active: bool,
     /// Pending action to be executed outside the TUI loop
     pending_action: Action,
+    /// Current sharing state
+    sharing_state: SharingState,
+    /// Provider selection state (when showing provider popup)
+    provider_select_state: ProviderSelectState,
 }
 
 impl Default for App {
@@ -75,6 +137,8 @@ impl App {
             search_query: String::new(),
             search_active: false,
             pending_action: Action::None,
+            sharing_state: SharingState::default(),
+            provider_select_state: ProviderSelectState::default(),
         }
     }
 
@@ -89,6 +153,8 @@ impl App {
             search_query: String::new(),
             search_active: false,
             pending_action: Action::None,
+            sharing_state: SharingState::default(),
+            provider_select_state: ProviderSelectState::default(),
         }
     }
 
@@ -141,6 +207,16 @@ impl App {
 
     /// Handle key events.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        // Route key events based on current state
+        if self.sharing_state.is_selecting_provider() {
+            return self.handle_provider_select_key(key_event);
+        }
+
+        if self.sharing_state.is_active() {
+            return self.handle_sharing_key(key_event);
+        }
+
+        // Normal key handling
         match key_event.code {
             // Quit on 'q'
             KeyCode::Char('q') => {
@@ -191,6 +267,12 @@ impl App {
                     self.pending_action = Action::ViewSession(session.path.clone());
                 }
             }
+            // Share: s to share selected session
+            KeyCode::Char('s') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::ShareSession(session.path.clone());
+                }
+            }
             // Refresh: r to reload sessions
             KeyCode::Char('r') => {
                 let _ = self.refresh_sessions();
@@ -198,6 +280,88 @@ impl App {
             // Escape closes app (for now, will change later for overlays)
             KeyCode::Esc => {
                 self.quit();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle key events when provider selection popup is shown.
+    fn handle_provider_select_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // Navigation in popup
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.provider_select_state.select_next();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.provider_select_state.select_previous();
+            }
+            // Confirm selection
+            KeyCode::Enter => {
+                if let Some(provider) = self.provider_select_state.selected_provider() {
+                    if let SharingState::SelectingProvider { session_path } = &self.sharing_state {
+                        // Move to Starting state and set pending action
+                        let path = session_path.clone();
+                        let provider_name = provider.name.clone();
+                        self.sharing_state = SharingState::Starting {
+                            session_path: path.clone(),
+                            provider_name: provider_name.clone(),
+                        };
+                        // Signal that we need to start sharing
+                        self.pending_action = Action::StartSharing {
+                            path,
+                            provider: provider_name,
+                        };
+                    }
+                }
+            }
+            // Cancel selection
+            KeyCode::Esc => {
+                self.sharing_state = SharingState::Inactive;
+            }
+            // Quit still works
+            KeyCode::Char('q') => {
+                self.sharing_state = SharingState::Inactive;
+                self.quit();
+            }
+            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.sharing_state = SharingState::Inactive;
+                self.quit();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle key events when actively sharing.
+    fn handle_sharing_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // Esc stops sharing
+            KeyCode::Esc => {
+                self.sharing_state = SharingState::Stopping;
+                self.pending_action = Action::StopSharing;
+            }
+            // Quit also stops sharing first
+            KeyCode::Char('q') => {
+                self.sharing_state = SharingState::Stopping;
+                self.pending_action = Action::StopSharing;
+                // Note: The main loop will need to handle quitting after stop
+            }
+            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.sharing_state = SharingState::Stopping;
+                self.pending_action = Action::StopSharing;
+            }
+            // Navigation still works while sharing
+            KeyCode::Char('j') | KeyCode::Down
+                if self.focused_panel == FocusedPanel::SessionList =>
+            {
+                self.session_list_state.select_next();
+            }
+            KeyCode::Char('k') | KeyCode::Up if self.focused_panel == FocusedPanel::SessionList => {
+                self.session_list_state.select_previous();
+            }
+            KeyCode::Tab => {
+                self.focused_panel.toggle();
             }
             _ => {}
         }
@@ -244,6 +408,34 @@ impl App {
         self.session_list_state.selected_session()
     }
 
+    /// Get the current sharing state.
+    pub fn sharing_state(&self) -> &SharingState {
+        &self.sharing_state
+    }
+
+    /// Start provider selection for sharing.
+    pub fn start_provider_selection(
+        &mut self,
+        session_path: PathBuf,
+        providers: Vec<ProviderOption>,
+    ) {
+        self.provider_select_state = ProviderSelectState::new(providers);
+        self.sharing_state = SharingState::SelectingProvider { session_path };
+    }
+
+    /// Set sharing as active with the given URL.
+    pub fn set_sharing_active(&mut self, url: String, provider: String) {
+        self.sharing_state = SharingState::Active {
+            public_url: url,
+            provider_name: provider,
+        };
+    }
+
+    /// Clear the sharing state (after stopping).
+    pub fn clear_sharing_state(&mut self) {
+        self.sharing_state = SharingState::Inactive;
+    }
+
     /// Check if the terminal size is too small.
     fn is_too_small(&self, area: Rect) -> bool {
         area.width < MIN_WIDTH || area.height < MIN_HEIGHT
@@ -273,8 +465,19 @@ impl App {
         // Render content (session list for now)
         self.render_content(frame, chunks[1]);
 
-        // Render footer
+        // Render footer (changes based on sharing state)
         self.render_footer(frame, chunks[2]);
+
+        // Render provider selection popup if selecting
+        if self.sharing_state.is_selecting_provider() {
+            self.render_provider_select_popup(frame, area);
+        }
+    }
+
+    /// Render the provider selection popup.
+    fn render_provider_select_popup(&mut self, frame: &mut Frame, area: Rect) {
+        let widget = ProviderSelect::new();
+        frame.render_stateful_widget(widget, area, &mut self.provider_select_state);
     }
 
     /// Render message when terminal is too small.
@@ -507,22 +710,54 @@ impl App {
 
     /// Render the footer with keyboard hints.
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let hints = Line::from(vec![
-            Span::styled(" v/Enter ", Style::default().fg(Color::Cyan)),
-            Span::raw("view  "),
-            Span::styled("j/k ", Style::default().fg(Color::Cyan)),
-            Span::raw("nav  "),
-            Span::styled("h/l ", Style::default().fg(Color::Cyan)),
-            Span::raw("expand  "),
-            Span::styled("Tab ", Style::default().fg(Color::Cyan)),
-            Span::raw("panel  "),
-            Span::styled("r ", Style::default().fg(Color::Cyan)),
-            Span::raw("refresh  "),
-            Span::styled("q ", Style::default().fg(Color::Cyan)),
-            Span::raw("quit"),
-        ]);
+        // Show different footer based on sharing state
+        let content = if let Some(url) = self.sharing_state.public_url() {
+            // Sharing is active - show URL and stop hint
+            Line::from(vec![
+                Span::styled("🌐 Sharing at ", Style::default().fg(Color::Green)),
+                Span::styled(
+                    url,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" - press ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Esc", Style::default().fg(Color::Yellow)),
+                Span::styled(" to stop", Style::default().fg(Color::DarkGray)),
+            ])
+        } else if matches!(self.sharing_state, SharingState::Starting { .. }) {
+            // Starting sharing - show loading message
+            Line::from(vec![Span::styled(
+                "Starting sharing... ",
+                Style::default().fg(Color::Yellow),
+            )])
+        } else if matches!(self.sharing_state, SharingState::Stopping) {
+            // Stopping sharing
+            Line::from(vec![Span::styled(
+                "Stopping sharing... ",
+                Style::default().fg(Color::Yellow),
+            )])
+        } else {
+            // Normal footer
+            Line::from(vec![
+                Span::styled(" v ", Style::default().fg(Color::Cyan)),
+                Span::raw("view  "),
+                Span::styled("s ", Style::default().fg(Color::Cyan)),
+                Span::raw("share  "),
+                Span::styled("j/k ", Style::default().fg(Color::Cyan)),
+                Span::raw("nav  "),
+                Span::styled("h/l ", Style::default().fg(Color::Cyan)),
+                Span::raw("expand  "),
+                Span::styled("Tab ", Style::default().fg(Color::Cyan)),
+                Span::raw("panel  "),
+                Span::styled("r ", Style::default().fg(Color::Cyan)),
+                Span::raw("refresh  "),
+                Span::styled("q ", Style::default().fg(Color::Cyan)),
+                Span::raw("quit"),
+            ])
+        };
 
-        let paragraph = Paragraph::new(hints)
+        let paragraph = Paragraph::new(content)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
 
@@ -929,5 +1164,231 @@ mod tests {
 
         // Should have a pending action
         assert!(app.has_pending_action());
+    }
+
+    // Tests for share action
+
+    #[test]
+    fn test_handle_key_s_triggers_share_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 's' to share
+        app.handle_key_event(key_event(KeyCode::Char('s'))).unwrap();
+
+        // Should have a pending ShareSession action
+        assert!(app.has_pending_action());
+        match app.pending_action() {
+            Action::ShareSession(path) => {
+                assert!(path.to_string_lossy().contains("abc12345.jsonl"));
+            }
+            _ => panic!("Expected ShareSession action"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_s_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // First item is a project, not a session
+        assert!(app.selected_session().is_none());
+
+        // Press 's' on project
+        app.handle_key_event(key_event(KeyCode::Char('s'))).unwrap();
+
+        // Should not have a pending action since we're on a project, not a session
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_s_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 's' with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('s'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_share_action_works_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Press 's' - should still work since we have a selected session
+        app.handle_key_event(key_event(KeyCode::Char('s'))).unwrap();
+
+        // Should have a pending action
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::ShareSession(_)));
+    }
+
+    // Tests for sharing state management
+
+    #[test]
+    fn test_sharing_state_default() {
+        let app = App::new();
+        assert!(!app.sharing_state().is_active());
+        assert!(!app.sharing_state().is_selecting_provider());
+        assert!(!app.sharing_state().is_busy());
+    }
+
+    #[test]
+    fn test_start_provider_selection() {
+        let mut app = App::new();
+        let path = PathBuf::from("/test/session.jsonl");
+        let providers = vec![
+            ProviderOption::new("cloudflare", "Cloudflare"),
+            ProviderOption::new("ngrok", "ngrok"),
+        ];
+
+        app.start_provider_selection(path.clone(), providers);
+
+        assert!(app.sharing_state().is_selecting_provider());
+        assert!(app.sharing_state().is_busy());
+        assert!(!app.sharing_state().is_active());
+    }
+
+    #[test]
+    fn test_set_sharing_active() {
+        let mut app = App::new();
+
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+
+        assert!(app.sharing_state().is_active());
+        assert!(app.sharing_state().is_busy());
+        assert_eq!(
+            app.sharing_state().public_url(),
+            Some("https://example.com")
+        );
+    }
+
+    #[test]
+    fn test_clear_sharing_state() {
+        let mut app = App::new();
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+        assert!(app.sharing_state().is_active());
+
+        app.clear_sharing_state();
+
+        assert!(!app.sharing_state().is_active());
+        assert!(!app.sharing_state().is_busy());
+    }
+
+    // Tests for provider selection key handling
+
+    #[test]
+    fn test_provider_select_navigation() {
+        let mut app = App::new();
+        let path = PathBuf::from("/test/session.jsonl");
+        let providers = vec![
+            ProviderOption::new("cloudflare", "Cloudflare"),
+            ProviderOption::new("ngrok", "ngrok"),
+            ProviderOption::new("tailscale", "Tailscale"),
+        ];
+
+        app.start_provider_selection(path, providers);
+        assert_eq!(app.provider_select_state.selected(), 0);
+
+        // Navigate down
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        assert_eq!(app.provider_select_state.selected(), 1);
+
+        // Navigate up
+        app.handle_key_event(key_event(KeyCode::Char('k'))).unwrap();
+        assert_eq!(app.provider_select_state.selected(), 0);
+
+        // Navigate with arrows
+        app.handle_key_event(key_event(KeyCode::Down)).unwrap();
+        assert_eq!(app.provider_select_state.selected(), 1);
+
+        app.handle_key_event(key_event(KeyCode::Up)).unwrap();
+        assert_eq!(app.provider_select_state.selected(), 0);
+    }
+
+    #[test]
+    fn test_provider_select_cancel_with_esc() {
+        let mut app = App::new();
+        let path = PathBuf::from("/test/session.jsonl");
+        let providers = vec![ProviderOption::new("cloudflare", "Cloudflare")];
+
+        app.start_provider_selection(path, providers);
+        assert!(app.sharing_state().is_selecting_provider());
+
+        // Press Esc to cancel
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+
+        // Should be back to inactive state
+        assert!(!app.sharing_state().is_selecting_provider());
+        assert!(!app.sharing_state().is_busy());
+        // App should still be running
+        assert!(app.is_running());
+    }
+
+    #[test]
+    fn test_provider_select_confirm_with_enter() {
+        let mut app = App::new();
+        let path = PathBuf::from("/test/session.jsonl");
+        let providers = vec![
+            ProviderOption::new("cloudflare", "Cloudflare"),
+            ProviderOption::new("ngrok", "ngrok"),
+        ];
+
+        app.start_provider_selection(path.clone(), providers);
+
+        // Select second provider
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+
+        // Press Enter to confirm
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+
+        // Should have StartSharing action
+        assert!(app.has_pending_action());
+        match app.take_pending_action() {
+            Action::StartSharing { path: p, provider } => {
+                assert_eq!(p, path);
+                assert_eq!(provider, "ngrok");
+            }
+            _ => panic!("Expected StartSharing action"),
+        }
+    }
+
+    // Tests for active sharing key handling
+
+    #[test]
+    fn test_sharing_esc_stops_sharing() {
+        let mut app = App::new();
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+        assert!(app.sharing_state().is_active());
+
+        // Press Esc to stop sharing
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+
+        // Should have StopSharing action
+        assert!(app.has_pending_action());
+        assert_eq!(app.take_pending_action(), Action::StopSharing);
+
+        // State should be stopping
+        assert!(matches!(app.sharing_state(), &SharingState::Stopping));
+    }
+
+    #[test]
+    fn test_sharing_navigation_still_works() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+
+        // Navigation should still work while sharing
+        let initial_selection = app.session_list_state.selected();
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        assert_ne!(app.session_list_state.selected(), initial_selection);
+
+        // Tab should still work
+        assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
+        app.handle_key_event(key_event(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused_panel(), FocusedPanel::Preview);
     }
 }

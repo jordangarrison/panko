@@ -1,5 +1,85 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 7: Share action integration
+
+### Summary
+Implemented the share action that allows users to share sessions via tunnel providers from within the TUI. The TUI continues running while sharing, displaying the public URL in the footer, and users can stop sharing with Esc.
+
+### Changes
+- Created `src/tui/widgets/provider_select.rs`:
+  - `ProviderOption` struct with name and display_name fields
+  - `ProviderSelectState` for managing provider selection in popup
+  - `ProviderSelect` widget implementing ratatui's `StatefulWidget`
+  - Navigation with j/k or arrows, Enter to confirm, Esc to cancel
+  - Centered popup with instructions
+  - 12 unit tests for provider selection
+
+- Created `src/tui/sharing.rs`:
+  - `SharingMessage` enum: Started, Error, Stopped
+  - `SharingCommand` enum: Stop
+  - `SharingHandle` for background sharing management
+  - Background thread that starts server + tunnel and waits for stop command
+  - Channel-based communication with TUI
+
+- Updated `src/tui/app.rs`:
+  - Added `SharingState` enum: Inactive, SelectingProvider, Starting, Active, Stopping
+  - Added `sharing_state` and `provider_select_state` fields to `App`
+  - Added `start_provider_selection()`, `set_sharing_active()`, `clear_sharing_state()` methods
+  - Added `handle_provider_select_key()` for popup key handling
+  - Added `handle_sharing_key()` for active sharing key handling
+  - Updated `render()` to show provider selection popup
+  - Updated `render_footer()` to show sharing status with URL
+  - `s` key triggers share action
+  - Esc stops sharing when active
+  - Navigation still works while sharing
+  - 12 new unit tests for sharing state and key handling
+
+- Updated `src/tui/actions.rs`:
+  - Added `StartSharing { path, provider }` variant
+  - Added `StopSharing` variant
+  - Added `SharingStarted { url, provider }` variant
+  - 3 new unit tests
+
+- Updated `src/tui/mod.rs`:
+  - Added `mod sharing` and exports
+  - Added `SharingState` export
+  - Added `ProviderOption` export
+
+- Updated `src/main.rs`:
+  - Added `sharing_handle` tracking in `run_tui()`
+  - Updated `handle_tui_action()` to take app reference and sharing handle
+  - Implemented `ShareSession` action handling:
+    - Detects available providers
+    - Single provider: starts sharing immediately
+    - Multiple providers: shows selection popup
+  - Implemented `StartSharing` action to spawn background sharing
+  - Implemented `StopSharing` action to cleanup
+  - Message checking loop for sharing status updates
+  - Copies URL to clipboard when sharing starts
+
+### Test Coverage (27 new tests)
+- 12 tests in `tui::widgets::provider_select` for selection state/widget
+- 12 tests in `tui::app` for sharing state and key handling
+- 3 tests in `tui::actions` for new action variants
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (278 tests passed - 262 unit, 16 integration)
+cargo clippy         ✓ (1 expected warning: search_active unused)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] s triggers share action
+- [x] If multiple tunnel providers, shows selection popup within TUI
+- [x] Spawns tunnel, copies URL to clipboard
+- [x] Shows sharing status with public URL in TUI
+- [x] Can stop sharing with Esc or dedicated key
+- [x] Status bar shows 'Sharing at <url> - press Esc to stop'
+
+---
+
 ## 2026-01-30 - M2 Story 6: View action integration
 
 ### Summary

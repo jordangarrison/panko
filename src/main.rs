@@ -359,6 +359,9 @@ fn run_tui() -> Result<()> {
         eprintln!("Warning: Failed to load sessions: {}", e);
     }
 
+    // Track the active sharing handle (if any)
+    let mut sharing_handle: Option<tui::SharingHandle> = None;
+
     // Main loop that handles TUI and actions
     loop {
         // Initialize terminal
@@ -373,7 +376,10 @@ fn run_tui() -> Result<()> {
         // Handle the result
         match result {
             Ok(tui::RunResult::Done) => {
-                // User quit, exit the loop
+                // User quit - stop any active sharing first
+                if let Some(handle) = sharing_handle.take() {
+                    handle.stop();
+                }
                 break;
             }
             Ok(tui::RunResult::Continue) => {
@@ -382,12 +388,45 @@ fn run_tui() -> Result<()> {
             }
             Ok(tui::RunResult::Action(action)) => {
                 // Handle the action
-                handle_tui_action(&action)?;
+                handle_tui_action(&action, &mut app, &mut sharing_handle)?;
                 // Continue the TUI loop after action completes
             }
             Err(e) => {
+                // Stop sharing on error
+                if let Some(handle) = sharing_handle.take() {
+                    handle.stop();
+                }
                 return Err(anyhow::anyhow!("Application error: {}", e));
             }
+        }
+
+        // Check for sharing messages
+        let mut should_clear_handle = false;
+        if let Some(ref handle) = sharing_handle {
+            while let Some(msg) = handle.try_recv() {
+                match msg {
+                    tui::SharingMessage::Started { url } => {
+                        // Copy URL to clipboard
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            let _ = clipboard.set_text(&url);
+                        }
+                        // Update app state
+                        app.set_sharing_active(url, "tunnel".to_string());
+                    }
+                    tui::SharingMessage::Error { message } => {
+                        eprintln!("Sharing error: {}", message);
+                        app.clear_sharing_state();
+                        should_clear_handle = true;
+                    }
+                    tui::SharingMessage::Stopped => {
+                        app.clear_sharing_state();
+                        should_clear_handle = true;
+                    }
+                }
+            }
+        }
+        if should_clear_handle {
+            sharing_handle = None;
         }
     }
 
@@ -395,15 +434,65 @@ fn run_tui() -> Result<()> {
 }
 
 /// Handle an action triggered from the TUI.
-fn handle_tui_action(action: &tui::Action) -> Result<()> {
+fn handle_tui_action(
+    action: &tui::Action,
+    app: &mut tui::App,
+    sharing_handle: &mut Option<tui::SharingHandle>,
+) -> Result<()> {
     match action {
         tui::Action::ViewSession(path) => {
+            // Stop any active sharing before viewing
+            if let Some(handle) = sharing_handle.take() {
+                handle.stop();
+                app.clear_sharing_state();
+            }
             // View the session using the existing server code
             handle_view_from_tui(path)?;
         }
-        tui::Action::ShareSession(_path) => {
-            // TODO: Implement in Story 7
-            println!("Share action not yet implemented");
+        tui::Action::ShareSession(path) => {
+            // Detect available providers
+            let available = detect_available_providers();
+            if available.is_empty() {
+                eprintln!(
+                    "No tunnel providers available. Install cloudflared, ngrok, or tailscale."
+                );
+                wait_for_key("Press Enter to continue...");
+                return Ok(());
+            }
+
+            // Convert to ProviderOption
+            let providers: Vec<tui::ProviderOption> = available
+                .iter()
+                .map(|p| tui::ProviderOption::new(p.name, p.display_name))
+                .collect();
+
+            if providers.len() == 1 {
+                // Only one provider - start sharing immediately
+                let provider = &providers[0];
+                *sharing_handle = Some(tui::SharingHandle::start(
+                    path.clone(),
+                    provider.name.clone(),
+                ));
+                app.set_sharing_active("Starting...".to_string(), provider.name.clone());
+            } else {
+                // Multiple providers - show selection popup
+                app.start_provider_selection(path.clone(), providers);
+            }
+        }
+        tui::Action::StartSharing { path, provider } => {
+            // Start sharing with the selected provider
+            *sharing_handle = Some(tui::SharingHandle::start(path.clone(), provider.clone()));
+        }
+        tui::Action::StopSharing => {
+            // Stop the current sharing session
+            if let Some(handle) = sharing_handle.take() {
+                handle.stop();
+            }
+            app.clear_sharing_state();
+        }
+        tui::Action::SharingStarted { url, provider } => {
+            // This is handled via the message channel now
+            app.set_sharing_active(url.clone(), provider.clone());
         }
         tui::Action::CopyPath(_path) => {
             // TODO: Implement in Story 8

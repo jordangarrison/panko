@@ -12,8 +12,26 @@ pub enum Action {
     /// The path is the session file to view.
     ViewSession(PathBuf),
     /// Share a session via a public tunnel.
-    /// The path is the session file to share.
+    /// This triggers provider detection and selection.
     ShareSession(PathBuf),
+    /// Start sharing with a specific provider.
+    /// Used after the user selects a provider from the popup.
+    StartSharing {
+        /// Path to the session file to share.
+        path: PathBuf,
+        /// Provider name to use (e.g., "cloudflare", "ngrok", "tailscale").
+        provider: String,
+    },
+    /// Stop the current sharing session.
+    StopSharing,
+    /// Sharing has started successfully.
+    /// The main loop should call `set_sharing_active` with the URL.
+    SharingStarted {
+        /// The public URL where the session is available.
+        url: String,
+        /// The provider name.
+        provider: String,
+    },
     /// Copy the session file path to clipboard.
     CopyPath(PathBuf),
     /// Open the containing folder in the file manager.
@@ -78,5 +96,45 @@ mod tests {
         let action = Action::None;
         let debug_str = format!("{:?}", action);
         assert!(debug_str.contains("None"));
+    }
+
+    #[test]
+    fn test_action_start_sharing() {
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let action = Action::StartSharing {
+            path: path.clone(),
+            provider: "cloudflare".to_string(),
+        };
+        match action {
+            Action::StartSharing {
+                path: p,
+                provider: prov,
+            } => {
+                assert_eq!(p, path);
+                assert_eq!(prov, "cloudflare");
+            }
+            _ => panic!("Expected StartSharing"),
+        }
+    }
+
+    #[test]
+    fn test_action_stop_sharing() {
+        let action = Action::StopSharing;
+        assert_eq!(action, Action::StopSharing);
+    }
+
+    #[test]
+    fn test_action_sharing_started() {
+        let action = Action::SharingStarted {
+            url: "https://example.com".to_string(),
+            provider: "cloudflare".to_string(),
+        };
+        match action {
+            Action::SharingStarted { url, provider } => {
+                assert_eq!(url, "https://example.com");
+                assert_eq!(provider, "cloudflare");
+            }
+            _ => panic!("Expected SharingStarted"),
+        }
     }
 }

@@ -103,7 +103,7 @@
       "title": "Share action integration",
       "description": "Share selected session with tunnel from TUI",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "s triggers share action",
         "If multiple tunnel providers, shows selection popup within TUI",
