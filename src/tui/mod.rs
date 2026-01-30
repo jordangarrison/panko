@@ -7,7 +7,7 @@ mod app;
 mod events;
 pub mod widgets;
 
-pub use app::{App, AppResult};
+pub use app::{App, AppResult, FocusedPanel, MIN_HEIGHT, MIN_WIDTH};
 pub use events::{Event, EventHandler};
 pub use widgets::{SessionList, SessionListState, TreeItem};
 

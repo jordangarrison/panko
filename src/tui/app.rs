@@ -11,6 +11,30 @@ use ratatui::{
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+/// Minimum terminal dimensions for the TUI to function properly.
+pub const MIN_WIDTH: u16 = 60;
+pub const MIN_HEIGHT: u16 = 10;
+
+/// Which panel currently has focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FocusedPanel {
+    /// Session list panel (left side).
+    #[default]
+    SessionList,
+    /// Preview panel (right side).
+    Preview,
+}
+
+impl FocusedPanel {
+    /// Toggle between panels.
+    pub fn toggle(&mut self) {
+        *self = match self {
+            FocusedPanel::SessionList => FocusedPanel::Preview,
+            FocusedPanel::Preview => FocusedPanel::SessionList,
+        };
+    }
+}
+
 /// Application state.
 #[derive(Debug)]
 pub struct App {
@@ -22,6 +46,12 @@ pub struct App {
     height: u16,
     /// Session list state for the tree view
     session_list_state: SessionListState,
+    /// Which panel currently has focus
+    focused_panel: FocusedPanel,
+    /// Search query input
+    search_query: String,
+    /// Whether we're currently in search input mode
+    search_active: bool,
 }
 
 impl Default for App {
@@ -38,6 +68,9 @@ impl App {
             width: 0,
             height: 0,
             session_list_state: SessionListState::new(),
+            focused_panel: FocusedPanel::default(),
+            search_query: String::new(),
+            search_active: false,
         }
     }
 
@@ -48,6 +81,9 @@ impl App {
             width: 0,
             height: 0,
             session_list_state: SessionListState::from_sessions(sessions),
+            focused_panel: FocusedPanel::default(),
+            search_query: String::new(),
+            search_active: false,
         }
     }
 
@@ -109,29 +145,39 @@ impl App {
             KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.quit();
             }
-            // Navigation: j or down arrow to move down
-            KeyCode::Char('j') | KeyCode::Down => {
+            // Tab: switch focus between panels
+            KeyCode::Tab => {
+                self.focused_panel.toggle();
+            }
+            // Navigation: j or down arrow to move down (only when session list focused)
+            KeyCode::Char('j') | KeyCode::Down
+                if self.focused_panel == FocusedPanel::SessionList =>
+            {
                 self.session_list_state.select_next();
             }
-            // Navigation: k or up arrow to move up
-            KeyCode::Char('k') | KeyCode::Up => {
+            // Navigation: k or up arrow to move up (only when session list focused)
+            KeyCode::Char('k') | KeyCode::Up if self.focused_panel == FocusedPanel::SessionList => {
                 self.session_list_state.select_previous();
             }
-            // Navigation: h or left arrow to collapse/go to parent
-            KeyCode::Char('h') | KeyCode::Left => {
+            // Navigation: h or left arrow to collapse/go to parent (only when session list focused)
+            KeyCode::Char('h') | KeyCode::Left
+                if self.focused_panel == FocusedPanel::SessionList =>
+            {
                 self.session_list_state.collapse_or_parent();
             }
-            // Navigation: l or right arrow to expand
-            KeyCode::Char('l') | KeyCode::Right => {
+            // Navigation: l or right arrow to expand (only when session list focused)
+            KeyCode::Char('l') | KeyCode::Right
+                if self.focused_panel == FocusedPanel::SessionList =>
+            {
                 self.session_list_state.expand_or_select();
             }
             // Navigation: g twice to go to first (handled by tick or state)
             // For now, single 'g' goes to first
-            KeyCode::Char('g') => {
+            KeyCode::Char('g') if self.focused_panel == FocusedPanel::SessionList => {
                 self.session_list_state.select_first();
             }
             // Navigation: G to go to last
-            KeyCode::Char('G') => {
+            KeyCode::Char('G') if self.focused_panel == FocusedPanel::SessionList => {
                 self.session_list_state.select_last();
             }
             // Refresh: r to reload sessions
@@ -145,6 +191,16 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Get the currently focused panel.
+    pub fn focused_panel(&self) -> FocusedPanel {
+        self.focused_panel
+    }
+
+    /// Set the focused panel.
+    pub fn set_focused_panel(&mut self, panel: FocusedPanel) {
+        self.focused_panel = panel;
     }
 
     /// Get the session list state.
@@ -162,9 +218,20 @@ impl App {
         self.session_list_state.selected_session()
     }
 
+    /// Check if the terminal size is too small.
+    fn is_too_small(&self, area: Rect) -> bool {
+        area.width < MIN_WIDTH || area.height < MIN_HEIGHT
+    }
+
     /// Render the application UI.
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
+
+        // Check for minimum terminal size
+        if self.is_too_small(area) {
+            self.render_too_small(frame, area);
+            return;
+        }
 
         // Main layout with header, content, and footer
         let chunks = Layout::vertical([
@@ -184,6 +251,48 @@ impl App {
         self.render_footer(frame, chunks[2]);
     }
 
+    /// Render message when terminal is too small.
+    fn render_too_small(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .title(" Agent Replay ")
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded);
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let text = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Terminal too small",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(format!("Minimum size: {}x{}", MIN_WIDTH, MIN_HEIGHT)),
+            Line::from(format!("Current size: {}x{}", area.width, area.height)),
+            Line::from(""),
+            Line::from("Please resize your terminal."),
+        ];
+
+        let paragraph = Paragraph::new(text).alignment(Alignment::Center);
+
+        // Center vertically if there's enough space
+        if inner.height >= 7 {
+            let vertical_center = Layout::vertical([
+                Constraint::Length((inner.height - 7) / 2),
+                Constraint::Length(7),
+                Constraint::Min(0),
+            ])
+            .split(inner)[1];
+            frame.render_widget(paragraph, vertical_center);
+        } else {
+            frame.render_widget(paragraph, inner);
+        }
+    }
+
     /// Render the header section.
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default()
@@ -196,18 +305,53 @@ impl App {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let text = Line::from(vec![
+        // Create a horizontal layout for header content
+        let header_chunks = Layout::horizontal([
+            Constraint::Length(20), // Session count
+            Constraint::Min(10),    // Search area (flexible)
+            Constraint::Length(10), // Help hint
+        ])
+        .split(inner);
+
+        // Left: Session count
+        let session_text = Line::from(vec![
             Span::raw("Sessions: "),
             Span::styled(
                 format!("{}", session_count),
                 Style::default().fg(Color::Cyan),
             ),
-            Span::raw("                                    "),
-            Span::styled("[?] Help", Style::default().fg(Color::DarkGray)),
         ]);
+        frame.render_widget(
+            Paragraph::new(session_text).alignment(Alignment::Left),
+            header_chunks[0],
+        );
 
-        let paragraph = Paragraph::new(text).alignment(Alignment::Left);
-        frame.render_widget(paragraph, inner);
+        // Center: Search input area (placeholder for now)
+        let search_text = if self.search_query.is_empty() {
+            Line::from(vec![
+                Span::styled("Search: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("(press / to search)", Style::default().fg(Color::DarkGray)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("Search: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(&self.search_query, Style::default().fg(Color::White)),
+            ])
+        };
+        frame.render_widget(
+            Paragraph::new(search_text).alignment(Alignment::Center),
+            header_chunks[1],
+        );
+
+        // Right: Help hint
+        let help_text = Line::from(vec![Span::styled(
+            "[?] Help",
+            Style::default().fg(Color::DarkGray),
+        )]);
+        frame.render_widget(
+            Paragraph::new(help_text).alignment(Alignment::Right),
+            header_chunks[2],
+        );
     }
 
     /// Render the main content area (session list and preview panel).
@@ -225,12 +369,25 @@ impl App {
 
     /// Render the session list panel.
     fn render_session_list(&mut self, frame: &mut Frame, area: Rect) {
+        let is_focused = self.focused_panel == FocusedPanel::SessionList;
+        let border_style = if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let title = if is_focused {
+            " Sessions [focused] "
+        } else {
+            " Sessions "
+        };
+
         if self.session_list_state.is_empty() {
             // Show empty state message
             let block = Block::default()
-                .title(" Sessions ")
+                .title(title)
                 .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded);
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_style(border_style);
 
             let inner = block.inner(area);
             frame.render_widget(block, area);
@@ -263,9 +420,10 @@ impl App {
         } else {
             // Render session list
             let block = Block::default()
-                .title(" Sessions ")
+                .title(title)
                 .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded);
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_style(border_style);
 
             let widget = SessionList::new()
                 .block(block)
@@ -287,10 +445,23 @@ impl App {
 
     /// Render the preview panel.
     fn render_preview(&self, frame: &mut Frame, area: Rect) {
+        let is_focused = self.focused_panel == FocusedPanel::Preview;
+        let border_style = if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let title = if is_focused {
+            " Preview [focused] "
+        } else {
+            " Preview "
+        };
+
         let block = Block::default()
-            .title(" Preview ")
+            .title(title)
             .borders(Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Rounded);
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(border_style);
 
         let selected_session = self.selected_session();
 
@@ -312,9 +483,11 @@ impl App {
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let hints = Line::from(vec![
             Span::styled(" j/k ", Style::default().fg(Color::Cyan)),
-            Span::raw("navigate  "),
+            Span::raw("nav  "),
             Span::styled("h/l ", Style::default().fg(Color::Cyan)),
             Span::raw("collapse/expand  "),
+            Span::styled("Tab ", Style::default().fg(Color::Cyan)),
+            Span::raw("switch panel  "),
             Span::styled("r ", Style::default().fg(Color::Cyan)),
             Span::raw("refresh  "),
             Span::styled("q ", Style::default().fg(Color::Cyan)),
@@ -522,5 +695,112 @@ mod tests {
         // Move to first session
         app.session_list_state_mut().select_next();
         assert!(app.selected_session().is_some());
+    }
+
+    // New tests for focus and layout functionality
+
+    #[test]
+    fn test_focused_panel_default() {
+        let app = App::new();
+        assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
+    }
+
+    #[test]
+    fn test_focused_panel_toggle() {
+        let mut panel = FocusedPanel::SessionList;
+        panel.toggle();
+        assert_eq!(panel, FocusedPanel::Preview);
+        panel.toggle();
+        assert_eq!(panel, FocusedPanel::SessionList);
+    }
+
+    #[test]
+    fn test_handle_key_tab_switches_focus() {
+        let mut app = App::new();
+        assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
+        app.handle_key_event(key_event(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused_panel(), FocusedPanel::Preview);
+        app.handle_key_event(key_event(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
+    }
+
+    #[test]
+    fn test_set_focused_panel() {
+        let mut app = App::new();
+        app.set_focused_panel(FocusedPanel::Preview);
+        assert_eq!(app.focused_panel(), FocusedPanel::Preview);
+        app.set_focused_panel(FocusedPanel::SessionList);
+        assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
+    }
+
+    #[test]
+    fn test_navigation_only_works_when_session_list_focused() {
+        let mut app = App::with_sessions(sample_sessions());
+        assert_eq!(app.session_list_state.selected(), 0);
+
+        // Navigation works when session list is focused
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        assert_eq!(app.session_list_state.selected(), 1);
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Navigation doesn't change selection when preview is focused
+        let selection_before = app.session_list_state.selected();
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        assert_eq!(app.session_list_state.selected(), selection_before);
+
+        app.handle_key_event(key_event(KeyCode::Char('k'))).unwrap();
+        assert_eq!(app.session_list_state.selected(), selection_before);
+    }
+
+    #[test]
+    fn test_is_too_small() {
+        let app = App::new();
+
+        // Too narrow
+        let small_rect = Rect::new(0, 0, MIN_WIDTH - 1, MIN_HEIGHT);
+        assert!(app.is_too_small(small_rect));
+
+        // Too short
+        let short_rect = Rect::new(0, 0, MIN_WIDTH, MIN_HEIGHT - 1);
+        assert!(app.is_too_small(short_rect));
+
+        // Both too small
+        let tiny_rect = Rect::new(0, 0, MIN_WIDTH - 1, MIN_HEIGHT - 1);
+        assert!(app.is_too_small(tiny_rect));
+
+        // Just right
+        let ok_rect = Rect::new(0, 0, MIN_WIDTH, MIN_HEIGHT);
+        assert!(!app.is_too_small(ok_rect));
+
+        // Larger is fine
+        let large_rect = Rect::new(0, 0, 100, 50);
+        assert!(!app.is_too_small(large_rect));
+    }
+
+    #[test]
+    fn test_refresh_r_works_regardless_of_focus() {
+        let mut app = App::new();
+
+        // Works when session list is focused
+        app.set_focused_panel(FocusedPanel::SessionList);
+        app.handle_key_event(key_event(KeyCode::Char('r'))).unwrap();
+        // Should not crash
+
+        // Also works when preview is focused
+        app.set_focused_panel(FocusedPanel::Preview);
+        app.handle_key_event(key_event(KeyCode::Char('r'))).unwrap();
+        // Should not crash
+    }
+
+    #[test]
+    fn test_quit_works_regardless_of_focus() {
+        let mut app = App::new();
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // q should still quit even when preview is focused
+        app.handle_key_event(key_event(KeyCode::Char('q'))).unwrap();
+        assert!(!app.is_running());
     }
 }

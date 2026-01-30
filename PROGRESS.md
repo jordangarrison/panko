@@ -1,5 +1,57 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 5: Layout with resizable panels
+
+### Summary
+Implemented the full TUI layout with header, search placeholder, footer, minimum size handling, and Tab key focus switching between panels.
+
+### Changes
+- Updated `src/tui/app.rs`:
+  - Added `FocusedPanel` enum with `SessionList` and `Preview` variants
+  - Added `MIN_WIDTH` (60) and `MIN_HEIGHT` (10) constants
+  - Added `focused_panel`, `search_query`, and `search_active` fields to `App`
+  - `handle_key_event()` now handles Tab key to toggle focus between panels
+  - Navigation keys (j/k/h/l/g/G) only work when session list is focused
+  - Added `is_too_small()` method to check minimum terminal dimensions
+  - `render()` now shows "Terminal too small" message with size requirements
+  - `render_header()` now shows three-part layout: session count, search placeholder, help hint
+  - `render_session_list()` shows "[focused]" indicator and cyan border when focused
+  - `render_preview()` shows "[focused]" indicator and cyan border when focused
+  - `render_footer()` includes "Tab" hint for switching panels
+  - Added `focused_panel()` and `set_focused_panel()` accessors
+  - 8 new unit tests for focus handling and minimum size
+
+- Updated `src/tui/mod.rs`:
+  - Added exports for `FocusedPanel`, `MIN_WIDTH`, `MIN_HEIGHT`
+
+### Test Coverage (8 new tests)
+- `test_focused_panel_default` - default focus is session list
+- `test_focused_panel_toggle` - toggle between panels
+- `test_handle_key_tab_switches_focus` - Tab key handling
+- `test_set_focused_panel` - setting focus programmatically
+- `test_navigation_only_works_when_session_list_focused` - j/k navigation only when focused
+- `test_is_too_small` - minimum size checking
+- `test_refresh_r_works_regardless_of_focus` - r key works in both panels
+- `test_quit_works_regardless_of_focus` - q key works in both panels
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (244 tests passed - 236 unit, 8 new)
+cargo clippy         ✓ (1 expected warning: search_active unused)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Header with app title and search input area
+- [x] Two-column layout: session list (left), preview (right)
+- [x] Footer with action hints
+- [x] Responsive to terminal size
+- [x] Minimum size handling (show message if too small)
+- [x] Tab key switches focus between panels (visual indicator)
+
+---
+
 ## 2026-01-30 - M2 Story 3: Session list widget with project grouping
 
 ### Summary

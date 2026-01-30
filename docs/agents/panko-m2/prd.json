@@ -72,7 +72,7 @@
       "title": "Layout with resizable panels",
       "description": "Implement the full TUI layout with header, panels, and footer",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Header with app title and search input area",
         "Two-column layout: session list (left), preview (right)",
