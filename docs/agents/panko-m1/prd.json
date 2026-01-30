@@ -208,7 +208,7 @@
       "title": "Check command for validation",
       "description": "Add a check command that validates session files without starting a server",
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "`panko check <file>` parses file and reports success/failure",
         "Shows summary stats on success (session ID, block count, duration)",

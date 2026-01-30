@@ -2,8 +2,9 @@
 //!
 //! Uses cloudflared to create free quick tunnels without authentication.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{binary_exists, TunnelError, TunnelHandle, TunnelProvider, TunnelResult};
@@ -92,7 +93,7 @@ impl TunnelProvider for CloudflareTunnel {
         // Spawn cloudflared tunnel command
         // The --url flag creates a quick tunnel without authentication
         let mut child = Command::new(Self::binary_name())
-            .args(["tunnel", "--url", &format!("localhost:{}", port)])
+            .args(["tunnel", "--url", &format!("http://127.0.0.1:{}", port)])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
@@ -102,12 +103,12 @@ impl TunnelProvider for CloudflareTunnel {
             TunnelError::SpawnFailed(std::io::Error::other("Failed to capture stderr"))
         })?;
 
-        let reader = BufReader::new(stderr);
+        let mut reader = BufReader::new(stderr);
         let start_time = Instant::now();
         let mut url: Option<String> = None;
 
         // Read stderr line by line looking for the URL
-        for line in reader.lines() {
+        loop {
             // Check for timeout
             if start_time.elapsed() > self.timeout {
                 // Kill the process before returning error
@@ -127,17 +128,39 @@ impl TunnelProvider for CloudflareTunnel {
                 Err(_) => {}   // Continue trying
             }
 
-            let line = line.map_err(|e| TunnelError::SpawnFailed(std::io::Error::other(e)))?;
-
-            // Try to parse URL from this line
-            if let Some(parsed_url) = Self::parse_url_from_output(&line) {
-                url = Some(parsed_url);
-                break;
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    // Try to parse URL from this line
+                    if let Some(parsed_url) = Self::parse_url_from_output(&line) {
+                        url = Some(parsed_url);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    return Err(TunnelError::SpawnFailed(std::io::Error::other(e)));
+                }
             }
         }
 
         match url {
-            Some(url) => Ok(TunnelHandle::new(child, url, self.name())),
+            Some(url) => {
+                // Spawn a thread to keep draining stderr so cloudflared doesn't block/die
+                // from SIGPIPE when it tries to write logs
+                thread::spawn(move || {
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match reader.read(&mut buf) {
+                            Ok(0) => break, // EOF
+                            Ok(_) => {}     // Discard the data
+                            Err(_) => break,
+                        }
+                    }
+                });
+
+                Ok(TunnelHandle::new(child, url, self.name()))
+            }
             None => {
                 // Kill the process before returning error
                 let _ = child.kill();

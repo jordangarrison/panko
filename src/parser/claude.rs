@@ -167,12 +167,10 @@ impl SessionParser for ClaudeParser {
                 .unwrap_or_else(|| "unknown".to_string())
         });
 
-        let started_at = started_at.ok_or_else(|| ParseError::empty_session(path))?;
+        // Use current time as fallback for sessions with no timestamp data
+        let started_at = started_at.unwrap_or_else(Utc::now);
 
-        if blocks.is_empty() {
-            return Err(ParseError::empty_session(path));
-        }
-
+        // Allow empty sessions (zero blocks) - they're valid JSONL files
         let mut session = Session::new(session_id, started_at);
         if let Some(proj) = project {
             session = session.with_project(proj);
@@ -584,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_session_error() {
+    fn test_empty_session_succeeds_with_zero_blocks() {
         let content = r#"{"type":"progress","timestamp":"2024-01-15T10:30:00Z"}
 {"type":"summary","summary":"Empty session"}"#;
 
@@ -592,11 +590,10 @@ mod tests {
         let parser = ClaudeParser::new();
         let result = parser.parse(file.path());
 
-        assert!(result.is_err());
-        match result {
-            Err(ParseError::EmptySession { .. }) => {}
-            _ => panic!("Expected EmptySession error"),
-        }
+        // Empty sessions should succeed with zero blocks
+        assert!(result.is_ok());
+        let session = result.unwrap();
+        assert!(session.blocks.is_empty());
     }
 
     #[test]
