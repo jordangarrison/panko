@@ -1,5 +1,66 @@
 # Panko Progress Log
 
+## 2026-01-30 - Story 14: Check command for validation
+
+### Summary
+Implemented the `panko check` command for validating session files without starting a server.
+
+### Changes
+- Updated `src/main.rs`:
+  - Added `Check` subcommand with `files` (required, multiple) and `quiet` flag
+  - Implemented `handle_check_command()` function to process multiple files
+  - Implemented `check_single_file()` to validate individual files
+  - Added `CheckResult` struct to track validation results
+  - Added `print_success_result()` and `print_failure_result()` helpers
+  - Added `format_duration()` to display session duration in human-readable form
+  - Returns exit code 0 on success, 1 if any file fails
+
+- Created `tests/check_command_integration.rs`:
+  - 9 integration tests covering:
+    - Valid file validation with stats output
+    - Nonexistent file error handling
+    - Multiple files (all valid, mixed)
+    - Quiet mode (-q) behavior
+    - Exit code verification (0 on success, non-zero on failure)
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (161 tests passed - 145 unit, 16 integration)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### End-to-End Test
+```
+$ cargo run -- check tests/fixtures/sample_claude_session.jsonl
+✓ tests/fixtures/sample_claude_session.jsonl
+  Session ID: abc12345-1234-5678-abcd-123456789abc
+  Blocks: 10
+  Duration: 1m 10s
+
+$ cargo run -- check nonexistent.jsonl
+✗ nonexistent.jsonl
+  Error: File not found: nonexistent.jsonl
+(exit code: 1)
+
+$ cargo run -- check -q tests/fixtures/sample_claude_session.jsonl nonexistent.jsonl
+✗ nonexistent.jsonl
+  Error: File not found: nonexistent.jsonl
+(exit code: 1)
+```
+
+### Acceptance Criteria
+- [x] `panko check <file>` parses file and reports success/failure
+- [x] Shows summary stats on success (session ID, block count, duration)
+- [x] Shows helpful error message on failure
+- [x] Supports multiple files: `panko check file1.jsonl file2.jsonl`
+- [x] Supports glob patterns via shell expansion
+- [x] Exit code 0 on success, non-zero on any failure
+- [x] Quiet mode (-q) for scripting that only outputs failures
+
+---
+
 ## 2026-01-29 - Story 12: Keyboard navigation in viewer
 
 ### Summary

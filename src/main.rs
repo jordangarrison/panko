@@ -49,6 +49,16 @@ enum Commands {
         #[arg(short, long, default_value = "3000")]
         port: u16,
     },
+    /// Validate session files without starting a server
+    Check {
+        /// Path(s) to session file(s) to validate
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+
+        /// Quiet mode: only output failures
+        #[arg(short, long)]
+        quiet: bool,
+    },
     /// Manage configuration settings
     Config {
         #[command(subcommand)]
@@ -317,6 +327,12 @@ async fn main() -> Result<()> {
 
             println!("Sharing stopped");
         }
+        Commands::Check { files, quiet } => {
+            let exit_code = handle_check_command(&files, quiet)?;
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+        }
         Commands::Config { action } => {
             handle_config_command(action)?;
         }
@@ -422,4 +438,146 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Result of checking a single file.
+struct CheckResult {
+    path: PathBuf,
+    success: bool,
+    session_id: Option<String>,
+    block_count: Option<usize>,
+    duration_secs: Option<i64>,
+    error: Option<String>,
+}
+
+/// Handle check subcommand - validate session files without starting a server.
+fn handle_check_command(files: &[PathBuf], quiet: bool) -> Result<i32> {
+    let mut results: Vec<CheckResult> = Vec::new();
+    let mut failure_count = 0;
+
+    for path in files {
+        let result = check_single_file(path);
+        if !result.success {
+            failure_count += 1;
+        }
+        results.push(result);
+    }
+
+    // Output results
+    for result in &results {
+        if result.success {
+            if !quiet {
+                print_success_result(result);
+            }
+        } else {
+            print_failure_result(result);
+        }
+    }
+
+    // Summary for multiple files
+    if files.len() > 1 && !quiet {
+        println!();
+        let success_count = results.iter().filter(|r| r.success).count();
+        println!(
+            "Summary: {}/{} files passed validation",
+            success_count,
+            files.len()
+        );
+    }
+
+    // Return exit code: 0 on success, 1 if any failures
+    Ok(if failure_count > 0 { 1 } else { 0 })
+}
+
+/// Check a single session file.
+fn check_single_file(path: &Path) -> CheckResult {
+    // Check if file exists
+    if !path.exists() {
+        return CheckResult {
+            path: path.to_path_buf(),
+            success: false,
+            session_id: None,
+            block_count: None,
+            duration_secs: None,
+            error: Some(format!("File not found: {}", path.display())),
+        };
+    }
+
+    // Try to parse the session
+    match parse_session(path) {
+        Ok(session) => {
+            // Calculate session duration if we have blocks
+            let duration_secs = if let (Some(first), Some(last)) =
+                (session.blocks.first(), session.blocks.last())
+            {
+                let first_ts = first.timestamp();
+                let last_ts = last.timestamp();
+                Some((last_ts - first_ts).num_seconds())
+            } else {
+                None
+            };
+
+            CheckResult {
+                path: path.to_path_buf(),
+                success: true,
+                session_id: Some(session.id),
+                block_count: Some(session.blocks.len()),
+                duration_secs,
+                error: None,
+            }
+        }
+        Err(e) => CheckResult {
+            path: path.to_path_buf(),
+            success: false,
+            session_id: None,
+            block_count: None,
+            duration_secs: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
+/// Print success result with summary stats.
+fn print_success_result(result: &CheckResult) {
+    println!("✓ {}", result.path.display());
+
+    if let Some(ref session_id) = result.session_id {
+        println!("  Session ID: {}", session_id);
+    }
+
+    if let Some(block_count) = result.block_count {
+        println!("  Blocks: {}", block_count);
+    }
+
+    if let Some(duration_secs) = result.duration_secs {
+        let duration_str = format_duration(duration_secs);
+        println!("  Duration: {}", duration_str);
+    }
+}
+
+/// Print failure result with error message.
+fn print_failure_result(result: &CheckResult) {
+    eprintln!("✗ {}", result.path.display());
+    if let Some(ref error) = result.error {
+        eprintln!("  Error: {}", error);
+    }
+}
+
+/// Format duration in human-readable form.
+fn format_duration(total_secs: i64) -> String {
+    if total_secs < 0 {
+        return "0s".to_string();
+    }
+
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
 }
