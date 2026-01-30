@@ -4,7 +4,10 @@
 //! Note: Tailscale serve only shares within your tailnet (private network),
 //! not publicly on the internet like other tunnel providers.
 
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use super::{binary_exists, TunnelError, TunnelHandle, TunnelProvider, TunnelResult};
 
@@ -158,7 +161,7 @@ impl TunnelProvider for TailscaleTunnel {
         // Run tailscale serve in foreground mode to expose the port
         // Format: tailscale serve --bg=false --https=<port> http://localhost:<port>
         // --bg=false ensures the process stays in foreground and can be killed to stop serving
-        let child = Command::new(Self::binary_name())
+        let mut child = Command::new(Self::binary_name())
             .args([
                 "serve",
                 "--bg=false",
@@ -168,6 +171,60 @@ impl TunnelProvider for TailscaleTunnel {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
+
+        // Take stderr handle to check for early errors and then drain
+        let stderr = child.stderr.take();
+
+        // Wait briefly and check if process exited immediately (e.g., permission denied)
+        thread::sleep(Duration::from_millis(500));
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Process exited early - check stderr for error message
+                if !status.success() {
+                    if let Some(stderr) = stderr {
+                        let reader = BufReader::new(stderr);
+                        let error_lines: Vec<String> =
+                            reader.lines().take(5).filter_map(|l| l.ok()).collect();
+                        let error_msg = error_lines.join(" ");
+
+                        // Check for permission/access denied errors
+                        if error_msg.contains("Access denied")
+                            || error_msg.contains("serve config denied")
+                        {
+                            return Err(TunnelError::NotAvailable(
+                                "Tailscale serve requires operator permissions. \
+                                Run 'sudo tailscale set --operator=$USER' once to fix this."
+                                    .to_string(),
+                            ));
+                        }
+
+                        return Err(TunnelError::NotAvailable(format!(
+                            "Tailscale serve failed: {}",
+                            error_msg
+                        )));
+                    }
+                    return Err(TunnelError::ProcessExited);
+                }
+            }
+            Ok(None) => {
+                // Process still running - spawn drain thread
+                if let Some(stderr) = stderr {
+                    thread::spawn(move || {
+                        let mut reader = BufReader::new(stderr);
+                        let mut buf = [0u8; 4096];
+                        loop {
+                            match reader.read(&mut buf) {
+                                Ok(0) => break, // EOF
+                                Ok(_) => {}     // Discard the data
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+            }
+            Err(_) => {} // Continue anyway
+        }
 
         // Construct the URL (tailscale serves on port 443 by default for HTTPS)
         // The --https=<port> sets the *local* port to forward from, but the serve

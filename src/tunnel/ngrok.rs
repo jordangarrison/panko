@@ -3,8 +3,9 @@
 //! Uses ngrok to create tunnels with both free and authenticated accounts.
 //! ngrok runs a local API on port 4040 that we query to get the public URL.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{binary_exists, TunnelError, TunnelHandle, TunnelProvider, TunnelResult};
@@ -165,6 +166,9 @@ impl TunnelProvider for NgrokTunnel {
 
         let start_time = Instant::now();
 
+        // Take stderr handle for later draining to prevent SIGPIPE
+        let stderr = child.stderr.take();
+
         // Try to get URL from stdout first (newer ngrok versions)
         let stdout = child.stdout.take();
         let mut url: Option<String> = None;
@@ -213,7 +217,24 @@ impl TunnelProvider for NgrokTunnel {
         }
 
         match url {
-            Some(url) => Ok(TunnelHandle::new(child, url, self.name())),
+            Some(url) => {
+                // Spawn a thread to keep draining stderr so ngrok doesn't block/die
+                // from SIGPIPE when it tries to write logs
+                if let Some(stderr) = stderr {
+                    thread::spawn(move || {
+                        let mut reader = std::io::BufReader::new(stderr);
+                        let mut buf = [0u8; 4096];
+                        loop {
+                            match reader.read(&mut buf) {
+                                Ok(0) => break, // EOF
+                                Ok(_) => {}     // Discard the data
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+                Ok(TunnelHandle::new(child, url, self.name()))
+            }
             None => {
                 let _ = child.kill();
                 let _ = child.wait();
