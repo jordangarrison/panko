@@ -119,6 +119,45 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Open a folder in the system file manager.
+///
+/// Cross-platform support:
+/// - macOS: uses `open`
+/// - Linux: uses `xdg-open`
+/// - Windows: uses `explorer`
+fn open_in_file_manager(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .context("Failed to open folder with 'open'")?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .context("Failed to open folder with 'xdg-open'")?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .context("Failed to open folder with 'explorer'")?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        anyhow::bail!("Opening folders is not supported on this platform");
+    }
+
+    Ok(())
+}
+
 /// Prompt the user to select a tunnel provider.
 fn prompt_tunnel_selection(providers: &[AvailableProvider]) -> Result<AvailableProvider> {
     let options: Vec<String> = providers
@@ -494,13 +533,32 @@ fn handle_tui_action(
             // This is handled via the message channel now
             app.set_sharing_active(url.clone(), provider.clone());
         }
-        tui::Action::CopyPath(_path) => {
-            // TODO: Implement in Story 8
-            println!("Copy path action not yet implemented");
+        tui::Action::CopyPath(path) => {
+            // Copy the session file path to clipboard
+            let path_str = path.display().to_string();
+            match copy_to_clipboard(&path_str) {
+                Ok(()) => {
+                    app.set_status_message(format!("✓ Copied: {}", path_str));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Copy failed: {}", e));
+                }
+            }
         }
-        tui::Action::OpenFolder(_path) => {
-            // TODO: Implement in Story 8
-            println!("Open folder action not yet implemented");
+        tui::Action::OpenFolder(path) => {
+            // Open the containing folder in the system file manager
+            if let Some(parent) = path.parent() {
+                match open_in_file_manager(parent) {
+                    Ok(()) => {
+                        app.set_status_message(format!("✓ Opened: {}", parent.display()));
+                    }
+                    Err(e) => {
+                        app.set_status_message(format!("✗ Open failed: {}", e));
+                    }
+                }
+            } else {
+                app.set_status_message("✗ Cannot determine parent folder");
+            }
         }
         tui::Action::None => {
             // Nothing to do

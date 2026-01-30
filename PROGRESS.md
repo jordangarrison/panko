@@ -1,5 +1,56 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 8: Copy path and open folder actions
+
+### Summary
+Implemented quick file management actions for copying session file paths to clipboard and opening the containing folder in the system file manager.
+
+### Changes
+- Updated `src/tui/app.rs`:
+  - Added `status_message: Option<String>` field to `App` for displaying brief confirmation messages
+  - Added `set_status_message()`, `clear_status_message()`, and `status_message()` methods
+  - Added `c` key handler to trigger `CopyPath` action when a session is selected
+  - Added `o` key handler to trigger `OpenFolder` action when a session is selected
+  - Updated `render_footer()` to show status message when present (takes priority over normal footer)
+  - Updated footer hints to include `c copy` and `o open`
+  - 10 new unit tests for copy/open actions and status message handling
+
+- Updated `src/main.rs`:
+  - Added `open_in_file_manager()` function with cross-platform support:
+    - macOS: uses `open` command
+    - Linux: uses `xdg-open` command
+    - Windows: uses `explorer` command
+  - Implemented `CopyPath` action handler that copies path to clipboard and shows confirmation message
+  - Implemented `OpenFolder` action handler that opens parent directory in file manager
+
+### Test Coverage (10 new tests)
+- `test_handle_key_c_triggers_copy_path_on_session` - c key on session creates CopyPath action
+- `test_handle_key_c_does_nothing_on_project` - c key on project does nothing
+- `test_handle_key_c_does_nothing_when_empty` - c key with no sessions does nothing
+- `test_handle_key_o_triggers_open_folder_on_session` - o key on session creates OpenFolder action
+- `test_handle_key_o_does_nothing_on_project` - o key on project does nothing
+- `test_handle_key_o_does_nothing_when_empty` - o key with no sessions does nothing
+- `test_status_message_default_is_none` - status message defaults to None
+- `test_set_status_message` - setting status message works
+- `test_clear_status_message` - clearing status message works
+- `test_copy_and_open_actions_work_regardless_of_focus` - actions work when preview panel is focused
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (288 tests passed - 272 unit, 16 integration)
+cargo clippy         ✓ (1 expected warning: search_active unused)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] c copies full session file path to clipboard
+- [x] Shows brief confirmation message
+- [x] o opens containing folder in system file manager
+- [x] Works on macOS (open), Linux (xdg-open), Windows (explorer)
+
+---
+
 ## 2026-01-30 - M2 Story 7: Share action integration
 
 ### Summary

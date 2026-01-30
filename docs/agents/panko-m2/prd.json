@@ -119,7 +119,7 @@
       "title": "Copy path and open folder actions",
       "description": "Quick actions for file management",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "c copies full session file path to clipboard",
         "Shows brief confirmation message",

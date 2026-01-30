@@ -117,6 +117,8 @@ pub struct App {
     sharing_state: SharingState,
     /// Provider selection state (when showing provider popup)
     provider_select_state: ProviderSelectState,
+    /// Status message to display in the footer (briefly)
+    status_message: Option<String>,
 }
 
 impl Default for App {
@@ -139,6 +141,7 @@ impl App {
             pending_action: Action::None,
             sharing_state: SharingState::default(),
             provider_select_state: ProviderSelectState::default(),
+            status_message: None,
         }
     }
 
@@ -155,6 +158,7 @@ impl App {
             pending_action: Action::None,
             sharing_state: SharingState::default(),
             provider_select_state: ProviderSelectState::default(),
+            status_message: None,
         }
     }
 
@@ -271,6 +275,18 @@ impl App {
             KeyCode::Char('s') => {
                 if let Some(session) = self.selected_session() {
                     self.pending_action = Action::ShareSession(session.path.clone());
+                }
+            }
+            // Copy path: c to copy session file path to clipboard
+            KeyCode::Char('c') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::CopyPath(session.path.clone());
+                }
+            }
+            // Open folder: o to open containing folder in file manager
+            KeyCode::Char('o') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::OpenFolder(session.path.clone());
                 }
             }
             // Refresh: r to reload sessions
@@ -434,6 +450,21 @@ impl App {
     /// Clear the sharing state (after stopping).
     pub fn clear_sharing_state(&mut self) {
         self.sharing_state = SharingState::Inactive;
+    }
+
+    /// Set a status message to display in the footer.
+    pub fn set_status_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some(message.into());
+    }
+
+    /// Clear the status message.
+    pub fn clear_status_message(&mut self) {
+        self.status_message = None;
+    }
+
+    /// Get the current status message.
+    pub fn status_message(&self) -> Option<&str> {
+        self.status_message.as_deref()
     }
 
     /// Check if the terminal size is too small.
@@ -710,8 +741,15 @@ impl App {
 
     /// Render the footer with keyboard hints.
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        // Show different footer based on sharing state
-        let content = if let Some(url) = self.sharing_state.public_url() {
+        // Show status message if present (takes priority)
+        let content = if let Some(ref msg) = self.status_message {
+            Line::from(vec![Span::styled(
+                msg.clone(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )])
+        } else if let Some(url) = self.sharing_state.public_url() {
             // Sharing is active - show URL and stop hint
             Line::from(vec![
                 Span::styled("🌐 Sharing at ", Style::default().fg(Color::Green)),
@@ -744,12 +782,10 @@ impl App {
                 Span::raw("view  "),
                 Span::styled("s ", Style::default().fg(Color::Cyan)),
                 Span::raw("share  "),
-                Span::styled("j/k ", Style::default().fg(Color::Cyan)),
-                Span::raw("nav  "),
-                Span::styled("h/l ", Style::default().fg(Color::Cyan)),
-                Span::raw("expand  "),
-                Span::styled("Tab ", Style::default().fg(Color::Cyan)),
-                Span::raw("panel  "),
+                Span::styled("c ", Style::default().fg(Color::Cyan)),
+                Span::raw("copy  "),
+                Span::styled("o ", Style::default().fg(Color::Cyan)),
+                Span::raw("open  "),
                 Span::styled("r ", Style::default().fg(Color::Cyan)),
                 Span::raw("refresh  "),
                 Span::styled("q ", Style::default().fg(Color::Cyan)),
@@ -1390,5 +1426,139 @@ mod tests {
         assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
         app.handle_key_event(key_event(KeyCode::Tab)).unwrap();
         assert_eq!(app.focused_panel(), FocusedPanel::Preview);
+    }
+
+    // Tests for copy path action
+
+    #[test]
+    fn test_handle_key_c_triggers_copy_path_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'c' to copy path
+        app.handle_key_event(key_event(KeyCode::Char('c'))).unwrap();
+
+        // Should have a pending CopyPath action
+        assert!(app.has_pending_action());
+        match app.pending_action() {
+            Action::CopyPath(path) => {
+                assert!(path.to_string_lossy().contains("abc12345.jsonl"));
+            }
+            _ => panic!("Expected CopyPath action"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_c_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // First item is a project, not a session
+        assert!(app.selected_session().is_none());
+
+        // Press 'c' on project
+        app.handle_key_event(key_event(KeyCode::Char('c'))).unwrap();
+
+        // Should not have a pending action since we're on a project, not a session
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_c_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'c' with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('c'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    // Tests for open folder action
+
+    #[test]
+    fn test_handle_key_o_triggers_open_folder_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'o' to open folder
+        app.handle_key_event(key_event(KeyCode::Char('o'))).unwrap();
+
+        // Should have a pending OpenFolder action
+        assert!(app.has_pending_action());
+        match app.pending_action() {
+            Action::OpenFolder(path) => {
+                assert!(path.to_string_lossy().contains("abc12345.jsonl"));
+            }
+            _ => panic!("Expected OpenFolder action"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_o_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // First item is a project, not a session
+        assert!(app.selected_session().is_none());
+
+        // Press 'o' on project
+        app.handle_key_event(key_event(KeyCode::Char('o'))).unwrap();
+
+        // Should not have a pending action since we're on a project, not a session
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_o_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'o' with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('o'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    // Tests for status message
+
+    #[test]
+    fn test_status_message_default_is_none() {
+        let app = App::new();
+        assert!(app.status_message().is_none());
+    }
+
+    #[test]
+    fn test_set_status_message() {
+        let mut app = App::new();
+        app.set_status_message("Test message");
+        assert_eq!(app.status_message(), Some("Test message"));
+    }
+
+    #[test]
+    fn test_clear_status_message() {
+        let mut app = App::new();
+        app.set_status_message("Test message");
+        assert!(app.status_message().is_some());
+
+        app.clear_status_message();
+        assert!(app.status_message().is_none());
+    }
+
+    #[test]
+    fn test_copy_and_open_actions_work_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Press 'c' - should still work since we have a selected session
+        app.handle_key_event(key_event(KeyCode::Char('c'))).unwrap();
+        assert!(app.has_pending_action());
+        assert!(matches!(app.take_pending_action(), Action::CopyPath(_)));
+
+        // Press 'o' - should also work
+        app.handle_key_event(key_event(KeyCode::Char('o'))).unwrap();
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::OpenFolder(_)));
     }
 }
