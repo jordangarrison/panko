@@ -3,7 +3,7 @@
 use crate::scanner::{ClaudeScanner, SessionMeta, SessionScanner};
 use crate::tui::actions::Action;
 use crate::tui::widgets::{
-    PreviewPanel, ProviderOption, ProviderSelect, ProviderSelectState, SessionList,
+    HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect, ProviderSelectState, SessionList,
     SessionListState,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -119,6 +119,8 @@ pub struct App {
     provider_select_state: ProviderSelectState,
     /// Status message to display in the footer (briefly)
     status_message: Option<String>,
+    /// Whether the help overlay is visible
+    show_help: bool,
 }
 
 impl Default for App {
@@ -142,6 +144,7 @@ impl App {
             sharing_state: SharingState::default(),
             provider_select_state: ProviderSelectState::default(),
             status_message: None,
+            show_help: false,
         }
     }
 
@@ -159,6 +162,7 @@ impl App {
             sharing_state: SharingState::default(),
             provider_select_state: ProviderSelectState::default(),
             status_message: None,
+            show_help: false,
         }
     }
 
@@ -211,6 +215,12 @@ impl App {
 
     /// Handle key events.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        // Handle help overlay (any key closes it)
+        if self.show_help {
+            self.show_help = false;
+            return Ok(());
+        }
+
         // Route key events based on current state
         if self.sharing_state.is_selecting_provider() {
             return self.handle_provider_select_key(key_event);
@@ -301,6 +311,10 @@ impl App {
             // Refresh: r to reload sessions
             KeyCode::Char('r') => {
                 let _ = self.refresh_sessions();
+            }
+            // Help: ? to show keyboard shortcuts
+            KeyCode::Char('?') => {
+                self.show_help = true;
             }
             // Escape: clear search if active, otherwise quit
             KeyCode::Esc => {
@@ -594,12 +608,23 @@ impl App {
         if self.sharing_state.is_selecting_provider() {
             self.render_provider_select_popup(frame, area);
         }
+
+        // Render help overlay if visible
+        if self.show_help {
+            self.render_help_overlay(frame, area);
+        }
     }
 
     /// Render the provider selection popup.
     fn render_provider_select_popup(&mut self, frame: &mut Frame, area: Rect) {
         let widget = ProviderSelect::new();
         frame.render_stateful_widget(widget, area, &mut self.provider_select_state);
+    }
+
+    /// Render the help overlay.
+    fn render_help_overlay(&self, frame: &mut Frame, area: Rect) {
+        let widget = HelpOverlay::new();
+        frame.render_widget(widget, area);
     }
 
     /// Render message when terminal is too small.
@@ -1815,5 +1840,110 @@ mod tests {
         // Esc should quit when no search is active
         app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
         assert!(!app.is_running());
+    }
+
+    // Tests for help overlay
+
+    #[test]
+    fn test_show_help_default_is_false() {
+        let app = App::new();
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn test_handle_key_question_mark_shows_help() {
+        let mut app = App::new();
+        assert!(!app.show_help);
+
+        // Press '?' to show help
+        app.handle_key_event(key_event(KeyCode::Char('?'))).unwrap();
+
+        assert!(app.show_help);
+        assert!(app.is_running()); // Should still be running
+    }
+
+    #[test]
+    fn test_any_key_closes_help_overlay() {
+        let mut app = App::new();
+        app.show_help = true;
+
+        // Any key should close help
+        app.handle_key_event(key_event(KeyCode::Char('a'))).unwrap();
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn test_esc_closes_help_overlay() {
+        let mut app = App::new();
+        app.show_help = true;
+
+        // Esc should close help
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(!app.show_help);
+        assert!(app.is_running()); // Should not quit when closing help
+    }
+
+    #[test]
+    fn test_q_closes_help_overlay_without_quitting() {
+        let mut app = App::new();
+        app.show_help = true;
+
+        // q should close help, not quit the app
+        app.handle_key_event(key_event(KeyCode::Char('q'))).unwrap();
+        assert!(!app.show_help);
+        assert!(app.is_running()); // Should still be running
+    }
+
+    #[test]
+    fn test_enter_closes_help_overlay() {
+        let mut app = App::new();
+        app.show_help = true;
+
+        // Enter should close help
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+        assert!(!app.show_help);
+        assert!(app.is_running());
+    }
+
+    #[test]
+    fn test_help_toggle_on_and_off() {
+        let mut app = App::new();
+
+        // Show help
+        app.handle_key_event(key_event(KeyCode::Char('?'))).unwrap();
+        assert!(app.show_help);
+
+        // Any key closes help
+        app.handle_key_event(key_event(KeyCode::Char('?'))).unwrap();
+        assert!(!app.show_help);
+
+        // Show help again
+        app.handle_key_event(key_event(KeyCode::Char('?'))).unwrap();
+        assert!(app.show_help);
+    }
+
+    #[test]
+    fn test_help_overlay_intercepts_navigation_keys() {
+        let mut app = App::with_sessions(sample_sessions());
+        let initial_selection = app.session_list_state().selected();
+
+        app.show_help = true;
+
+        // j should close help, not navigate
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        assert!(!app.show_help);
+        assert_eq!(app.session_list_state().selected(), initial_selection);
+    }
+
+    #[test]
+    fn test_help_overlay_intercepts_action_keys() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next(); // Select a session
+        app.show_help = true;
+
+        // v should close help, not trigger view action
+        app.handle_key_event(key_event(KeyCode::Char('v'))).unwrap();
+        assert!(!app.show_help);
+        assert!(!app.has_pending_action()); // No action should be triggered
     }
 }

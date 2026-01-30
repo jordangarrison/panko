@@ -14,12 +14,12 @@
 | 2 | TUI application scaffold with ratatui | ✅ Complete | |
 | 3 | Session list widget with project grouping | ✅ Complete | |
 | 4 | Preview panel | ✅ Complete | Added 2025-01-30 |
-| 5 | Layout with resizable panels | ⬜ Not Started | |
-| 6 | View action integration | ⬜ Not Started | |
-| 7 | Share action integration | ⬜ Not Started | |
-| 8 | Copy path and open folder actions | ⬜ Not Started | |
-| 9 | Fuzzy search | ⬜ Not Started | |
-| 10 | Help overlay | ⬜ Not Started | |
+| 5 | Layout with resizable panels | ✅ Complete | |
+| 6 | View action integration | ✅ Complete | |
+| 7 | Share action integration | ✅ Complete | |
+| 8 | Copy path and open folder actions | ✅ Complete | |
+| 9 | Fuzzy search | ✅ Complete | |
+| 10 | Help overlay | ✅ Complete | Added 2026-01-30 |
 | 11 | Refresh and auto-refresh | ⬜ Not Started | |
 | 12 | Sorting options | ⬜ Not Started | |
 | 13 | Multiple agent support in scanner | ⬜ Not Started | |
@@ -33,6 +33,28 @@
 - ❌ Blocked
 
 ## Work Log
+
+### 2026-01-30
+
+**Story 10: Help overlay** - ✅ Complete
+
+Implemented the help overlay widget that displays all keyboard shortcuts grouped by category.
+
+**Changes:**
+- Created `src/tui/widgets/help.rs` with `HelpOverlay` widget
+- Shortcuts grouped into 4 categories: Navigation, Search, Actions, General
+- `?` key toggles the overlay
+- Any key or Esc closes the overlay
+- Help hint `[?] Help` already shown in header
+- Semi-transparent effect via Clear widget (clears area behind popup)
+
+**Validation Results:**
+- `cargo build` ✅
+- `cargo test` ✅ (327 tests passed)
+- `cargo clippy` ✅ (no warnings)
+- `cargo fmt --check` ✅
+
+---
 
 ### 2025-01-30
 

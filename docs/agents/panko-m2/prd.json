@@ -150,7 +150,7 @@
       "title": "Help overlay",
       "description": "Show keyboard shortcuts in modal overlay",
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "? toggles help overlay",
         "Overlay shows all keyboard shortcuts grouped by category",
