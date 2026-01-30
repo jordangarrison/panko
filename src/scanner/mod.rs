@@ -5,13 +5,51 @@
 //! scanning and metadata extraction.
 
 mod claude;
+mod codex;
+mod registry;
 
 pub use claude::ClaudeScanner;
+pub use codex::CodexScanner;
+pub use registry::ScannerRegistry;
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+/// The type of AI coding agent that produced the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum AgentType {
+    /// Claude Code sessions (stored in ~/.claude/projects/).
+    #[default]
+    Claude,
+    /// OpenAI Codex sessions (stored in ~/.codex/).
+    Codex,
+}
+
+impl AgentType {
+    /// Returns a short display name for the agent type.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "Claude",
+            AgentType::Codex => "Codex",
+        }
+    }
+
+    /// Returns a short tag suitable for display in the UI.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "CC",
+            AgentType::Codex => "CX",
+        }
+    }
+}
+
+impl std::fmt::Display for AgentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
 
 /// Metadata about a discovered session.
 ///
@@ -33,6 +71,8 @@ pub struct SessionMeta {
     pub first_prompt_preview: Option<String>,
     /// Tool usage counts (tool name -> count).
     pub tool_usage: Option<HashMap<String, usize>>,
+    /// The type of AI agent that produced this session.
+    pub agent_type: AgentType,
 }
 
 impl SessionMeta {
@@ -51,6 +91,7 @@ impl SessionMeta {
             message_count: 0,
             first_prompt_preview: None,
             tool_usage: None,
+            agent_type: AgentType::default(),
         }
     }
 
@@ -69,6 +110,12 @@ impl SessionMeta {
     /// Set the tool usage counts.
     pub fn with_tool_usage(mut self, tool_usage: HashMap<String, usize>) -> Self {
         self.tool_usage = Some(tool_usage);
+        self
+    }
+
+    /// Set the agent type.
+    pub fn with_agent_type(mut self, agent_type: AgentType) -> Self {
+        self.agent_type = agent_type;
         self
     }
 }
@@ -152,6 +199,9 @@ impl ScanError {
 pub trait SessionScanner: Send + Sync {
     /// Returns the name of this scanner (e.g., "claude", "codex").
     fn name(&self) -> &'static str;
+
+    /// Returns the agent type this scanner is for.
+    fn agent_type(&self) -> AgentType;
 
     /// Scan a directory for sessions and return their metadata.
     ///

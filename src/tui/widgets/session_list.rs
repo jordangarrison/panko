@@ -165,7 +165,11 @@ impl TreeItem {
                 let time_ago = format_relative_time(meta.updated_at, now);
                 let msg_count = format!("{} msgs", meta.message_count);
                 let id_truncated = truncate_id(&meta.id, 8);
-                format!("  {} {} {}", id_truncated, time_ago, msg_count)
+                let agent_tag = meta.agent_type.tag();
+                format!(
+                    "  [{}] {} {} {}",
+                    agent_tag, id_truncated, time_ago, msg_count
+                )
             }
         }
     }

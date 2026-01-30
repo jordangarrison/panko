@@ -195,7 +195,7 @@
       "title": "Multiple agent support in scanner",
       "description": "Extend scanner to detect and scan multiple agent session locations",
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Scanner registry that holds multiple SessionScanner implementations",
         "Codex scanner stub (for future implementation)",

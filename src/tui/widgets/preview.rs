@@ -87,6 +87,18 @@ impl<'a> PreviewPanel<'a> {
                 Span::styled("Session: ", self.label_style),
                 Span::styled(session.id.clone(), self.value_style),
             ]),
+            // Agent type
+            Line::from(vec![
+                Span::styled("Agent: ", self.label_style),
+                Span::styled(
+                    format!(
+                        "{} [{}]",
+                        session.agent_type.display_name(),
+                        session.agent_type.tag()
+                    ),
+                    Style::default().fg(Color::Magenta),
+                ),
+            ]),
             // Started timestamp (using updated_at since we don't track start separately)
             Line::from(vec![
                 Span::styled("Updated: ", self.label_style),

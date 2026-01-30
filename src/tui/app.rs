@@ -1,6 +1,6 @@
 //! Application state management for the TUI.
 
-use crate::scanner::{ClaudeScanner, SessionMeta, SessionScanner};
+use crate::scanner::{ScannerRegistry, SessionMeta};
 use crate::tui::actions::Action;
 use crate::tui::widgets::{
     HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect, ProviderSelectState, SessionList,
@@ -187,23 +187,13 @@ impl App {
         }
     }
 
-    /// Load sessions from the default scanner locations.
+    /// Load sessions from all registered scanner locations.
+    ///
+    /// Uses the `ScannerRegistry` to scan sessions from all registered
+    /// AI coding agents (Claude, Codex, etc.).
     pub fn load_sessions(&mut self) -> AppResult<()> {
-        let scanner = ClaudeScanner::new();
-        let mut all_sessions = Vec::new();
-
-        for root in scanner.default_roots() {
-            if root.exists() {
-                match scanner.scan_directory(&root) {
-                    Ok(sessions) => all_sessions.extend(sessions),
-                    Err(e) => {
-                        // Log error but continue scanning other roots
-                        eprintln!("Warning: Failed to scan {}: {}", root.display(), e);
-                    }
-                }
-            }
-        }
-
+        let registry = ScannerRegistry::default();
+        let all_sessions = registry.scan_all_defaults();
         self.session_list_state = SessionListState::from_sessions(all_sessions);
         Ok(())
     }

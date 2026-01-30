@@ -20,9 +20,9 @@
 | 8 | Copy path and open folder actions | ✅ Complete | |
 | 9 | Fuzzy search | ✅ Complete | |
 | 10 | Help overlay | ✅ Complete | Added 2026-01-30 |
-| 11 | Refresh and auto-refresh | ⬜ Not Started | |
-| 12 | Sorting options | ⬜ Not Started | |
-| 13 | Multiple agent support in scanner | ⬜ Not Started | |
+| 11 | Refresh and auto-refresh | ✅ Complete | |
+| 12 | Sorting options | ✅ Complete | |
+| 13 | Multiple agent support in scanner | ✅ Complete | Added 2026-01-30 |
 | 14 | Session deletion with confirmation | ⬜ Not Started | |
 
 ## Legend
@@ -35,6 +35,37 @@
 ## Work Log
 
 ### 2026-01-30
+
+**Story 13: Multiple agent support in scanner** - ✅ Complete
+
+Implemented a scanner registry system to support multiple AI coding agents with agent type tagging in the UI.
+
+**Changes:**
+- Added `AgentType` enum to `src/scanner/mod.rs` with `Claude` and `Codex` variants
+- Added `agent_type` field to `SessionMeta` struct
+- Added `agent_type()` method to `SessionScanner` trait
+- Created `src/scanner/codex.rs` with `CodexScanner` stub for future Codex support
+- Created `src/scanner/registry.rs` with `ScannerRegistry` to hold multiple scanners
+- Updated `ClaudeScanner` to set `AgentType::Claude` on sessions
+- Updated TUI session list to display agent tag (e.g., `[CC]` for Claude, `[CX]` for Codex)
+- Updated TUI preview panel to show agent type with display name
+- Updated `App::load_sessions()` to use `ScannerRegistry` instead of direct `ClaudeScanner`
+- Missing directories are handled gracefully (return empty, no error)
+
+**Acceptance Criteria Met:**
+- ✅ Scanner registry holds multiple SessionScanner implementations
+- ✅ Codex scanner stub for future implementation
+- ✅ Sessions tagged with agent type in UI
+- ✅ Filter by agent type (optional) - `ScannerRegistry::filter_by_agent_type()` available
+- ✅ Gracefully handles missing directories (e.g., ~/.codex/ not installed)
+
+**Validation Results:**
+- `cargo build` ✅
+- `cargo test` ✅ (380 tests passed)
+- `cargo clippy` ✅ (no warnings)
+- `cargo fmt --check` ✅
+
+---
 
 **Story 10: Help overlay** - ✅ Complete
 

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use super::{ScanError, SessionMeta, SessionScanner};
+use super::{AgentType, ScanError, SessionMeta, SessionScanner};
 
 /// Scanner for Claude Code sessions stored in `~/.claude/projects/`.
 #[derive(Debug, Default)]
@@ -103,7 +103,8 @@ impl ClaudeScanner {
         }
 
         let mut meta = SessionMeta::new(id, path.to_path_buf(), project_path, updated_at)
-            .with_message_count(message_count);
+            .with_message_count(message_count)
+            .with_agent_type(AgentType::Claude);
 
         if let Some(prompt) = first_prompt {
             meta = meta.with_first_prompt_preview(prompt);
@@ -120,6 +121,10 @@ impl ClaudeScanner {
 impl SessionScanner for ClaudeScanner {
     fn name(&self) -> &'static str {
         "claude"
+    }
+
+    fn agent_type(&self) -> AgentType {
+        AgentType::Claude
     }
 
     fn scan_directory(&self, root: &Path) -> Result<Vec<SessionMeta>, ScanError> {
