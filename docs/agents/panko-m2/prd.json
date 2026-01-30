@@ -220,6 +220,23 @@
         "Cannot delete while sharing is active"
       ],
       "depends_on": ["5"]
+    },
+    {
+      "id": "15",
+      "title": "Open draft PR for milestone",
+      "description": "Create a draft pull request on GitHub for the feature/tui-browser branch",
+      "priority": 15,
+      "passes": false,
+      "acceptance_criteria": [
+        "All previous stories (1-14) have passes: true",
+        "Branch is pushed to remote with all commits",
+        "Draft PR created via gh CLI targeting main branch",
+        "PR title: 'feat(tui): Interactive TUI for browsing and sharing AI coding agent sessions'",
+        "PR body includes summary of features implemented",
+        "PR body includes test plan checklist",
+        "PR is marked as draft (not ready for review)"
+      ],
+      "depends_on": ["14"]
     }
   ]
 }
