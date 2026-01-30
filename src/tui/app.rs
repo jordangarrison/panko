@@ -220,6 +220,11 @@ impl App {
             return self.handle_sharing_key(key_event);
         }
 
+        // Handle search mode input
+        if self.search_active {
+            return self.handle_search_key(key_event);
+        }
+
         // Normal key handling
         match key_event.code {
             // Quit on 'q'
@@ -233,6 +238,10 @@ impl App {
             // Tab: switch focus between panels
             KeyCode::Tab => {
                 self.focused_panel.toggle();
+            }
+            // Search: / to activate search mode
+            KeyCode::Char('/') => {
+                self.activate_search();
             }
             // Navigation: j or down arrow to move down (only when session list focused)
             KeyCode::Char('j') | KeyCode::Down
@@ -293,13 +302,95 @@ impl App {
             KeyCode::Char('r') => {
                 let _ = self.refresh_sessions();
             }
-            // Escape closes app (for now, will change later for overlays)
+            // Escape: clear search if active, otherwise quit
             KeyCode::Esc => {
-                self.quit();
+                if self.session_list_state.is_searching() {
+                    self.clear_search();
+                } else {
+                    self.quit();
+                }
             }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Handle key events when search input is active.
+    fn handle_search_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // Escape: deactivate search input
+            KeyCode::Esc => {
+                self.deactivate_search();
+            }
+            // Enter: select first match and exit search mode
+            KeyCode::Enter => {
+                // Just exit search input mode - selection is preserved
+                self.search_active = false;
+            }
+            // Backspace: remove last character
+            KeyCode::Backspace => {
+                if !self.search_query.is_empty() {
+                    self.search_query.pop();
+                    self.update_search_filter();
+                }
+            }
+            // Ctrl+C: quit (must be before generic Char match)
+            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.quit();
+            }
+            // Typing characters: add to search query
+            KeyCode::Char(c) => {
+                self.search_query.push(c);
+                self.update_search_filter();
+            }
+            // Navigation still works during search input
+            KeyCode::Down => {
+                self.session_list_state.select_next();
+            }
+            KeyCode::Up => {
+                self.session_list_state.select_previous();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Activate search input mode.
+    fn activate_search(&mut self) {
+        self.search_active = true;
+        // Focus session list when searching
+        self.focused_panel = FocusedPanel::SessionList;
+    }
+
+    /// Deactivate search input mode without clearing the filter.
+    fn deactivate_search(&mut self) {
+        self.search_active = false;
+        // If query is empty, clear the search
+        if self.search_query.is_empty() {
+            self.session_list_state.clear_search();
+        }
+    }
+
+    /// Update the search filter based on the current query.
+    fn update_search_filter(&mut self) {
+        self.session_list_state.set_search_query(&self.search_query);
+    }
+
+    /// Clear the search completely.
+    pub fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.search_active = false;
+        self.session_list_state.clear_search();
+    }
+
+    /// Check if search input is active.
+    pub fn is_search_active(&self) -> bool {
+        self.search_active
+    }
+
+    /// Get the current search query.
+    pub fn search_query(&self) -> &str {
+        &self.search_query
     }
 
     /// Handle key events when provider selection popup is shown.
@@ -573,29 +664,50 @@ impl App {
         ])
         .split(inner);
 
-        // Left: Session count
-        let session_text = Line::from(vec![
-            Span::raw("Sessions: "),
-            Span::styled(
-                format!("{}", session_count),
-                Style::default().fg(Color::Cyan),
-            ),
-        ]);
+        // Left: Session count (with total if filtering)
+        let session_text = if self.session_list_state.is_searching() {
+            // Show filtered count and search indicator
+            Line::from(vec![
+                Span::raw("Matches: "),
+                Span::styled(
+                    format!("{}", session_count),
+                    Style::default().fg(Color::Yellow),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::raw("Sessions: "),
+                Span::styled(
+                    format!("{}", session_count),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ])
+        };
         frame.render_widget(
             Paragraph::new(session_text).alignment(Alignment::Left),
             header_chunks[0],
         );
 
-        // Center: Search input area (placeholder for now)
-        let search_text = if self.search_query.is_empty() {
+        // Center: Search input area
+        let search_text = if self.search_active {
+            // Active search input mode - show cursor
+            Line::from(vec![
+                Span::styled("Search: ", Style::default().fg(Color::Cyan)),
+                Span::styled(&self.search_query, Style::default().fg(Color::White)),
+                Span::styled("█", Style::default().fg(Color::Cyan)), // Cursor
+            ])
+        } else if !self.search_query.is_empty() {
+            // Search filter is active but not typing
+            Line::from(vec![
+                Span::styled("Search: ", Style::default().fg(Color::Yellow)),
+                Span::styled(&self.search_query, Style::default().fg(Color::Yellow)),
+                Span::styled(" (Esc to clear)", Style::default().fg(Color::DarkGray)),
+            ])
+        } else {
+            // No search
             Line::from(vec![
                 Span::styled("Search: ", Style::default().fg(Color::DarkGray)),
                 Span::styled("(press / to search)", Style::default().fg(Color::DarkGray)),
-            ])
-        } else {
-            Line::from(vec![
-                Span::styled("Search: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(&self.search_query, Style::default().fg(Color::White)),
             ])
         };
         frame.render_widget(
@@ -1560,5 +1672,148 @@ mod tests {
         app.handle_key_event(key_event(KeyCode::Char('o'))).unwrap();
         assert!(app.has_pending_action());
         assert!(matches!(app.pending_action(), Action::OpenFolder(_)));
+    }
+
+    // Tests for fuzzy search
+
+    #[test]
+    fn test_search_default_inactive() {
+        let app = App::new();
+        assert!(!app.is_search_active());
+        assert_eq!(app.search_query(), "");
+    }
+
+    #[test]
+    fn test_handle_key_slash_activates_search() {
+        let mut app = App::with_sessions(sample_sessions());
+        assert!(!app.is_search_active());
+
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+
+        assert!(app.is_search_active());
+        // Focus should be on session list
+        assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
+    }
+
+    #[test]
+    fn test_search_typing_updates_query() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+
+        // Type some characters
+        app.handle_key_event(key_event(KeyCode::Char('a'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('p'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('i'))).unwrap();
+
+        assert_eq!(app.search_query(), "api");
+    }
+
+    #[test]
+    fn test_search_backspace_removes_character() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+
+        // Type "api"
+        app.handle_key_event(key_event(KeyCode::Char('a'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('p'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('i'))).unwrap();
+        assert_eq!(app.search_query(), "api");
+
+        // Backspace removes last char
+        app.handle_key_event(key_event(KeyCode::Backspace)).unwrap();
+        assert_eq!(app.search_query(), "ap");
+    }
+
+    #[test]
+    fn test_search_esc_deactivates_search_mode() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+        assert!(app.is_search_active());
+
+        // Type something
+        app.handle_key_event(key_event(KeyCode::Char('a'))).unwrap();
+
+        // Esc should exit search mode but keep query if non-empty
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(!app.is_search_active());
+    }
+
+    #[test]
+    fn test_search_enter_exits_search_mode() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('a'))).unwrap();
+        assert!(app.is_search_active());
+
+        // Enter should exit search input mode
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+        assert!(!app.is_search_active());
+    }
+
+    #[test]
+    fn test_clear_search_clears_everything() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('a'))).unwrap();
+
+        app.clear_search();
+
+        assert!(!app.is_search_active());
+        assert_eq!(app.search_query(), "");
+    }
+
+    #[test]
+    fn test_search_navigation_works_during_search() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+        assert!(app.is_search_active());
+
+        // Arrow keys should still navigate
+        let initial_selection = app.session_list_state().selected();
+        app.handle_key_event(key_event(KeyCode::Down)).unwrap();
+        assert_ne!(app.session_list_state().selected(), initial_selection);
+    }
+
+    #[test]
+    fn test_search_ctrl_c_quits() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+        assert!(app.is_running());
+
+        // Ctrl+C should quit even in search mode
+        app.handle_key_event(key_event_with_modifiers(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))
+        .unwrap();
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn test_esc_clears_active_search_instead_of_quitting() {
+        let mut app = App::with_sessions(sample_sessions());
+
+        // Apply a search filter (not in active search mode, just with an active filter)
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('a'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap(); // Exit search input mode
+
+        assert!(!app.is_search_active());
+        assert!(app.session_list_state().is_searching()); // Filter is active
+
+        // Esc should clear the filter, not quit
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(app.is_running()); // Still running
+        assert!(!app.session_list_state().is_searching()); // Filter cleared
+    }
+
+    #[test]
+    fn test_esc_quits_when_no_search_active() {
+        let mut app = App::with_sessions(sample_sessions());
+        assert!(!app.session_list_state().is_searching());
+
+        // Esc should quit when no search is active
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(!app.is_running());
     }
 }

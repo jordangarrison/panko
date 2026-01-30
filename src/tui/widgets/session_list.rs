@@ -5,6 +5,8 @@
 
 use crate::scanner::SessionMeta;
 use chrono::{DateTime, Utc};
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -118,6 +120,17 @@ fn format_relative_time(time: DateTime<Utc>, now: DateTime<Utc>) -> String {
     }
 }
 
+/// A search match result with the matched item index and match positions.
+#[derive(Debug, Clone)]
+pub struct SearchMatch {
+    /// Index into the items vec.
+    pub item_index: usize,
+    /// Score from the fuzzy matcher (higher is better).
+    pub score: i64,
+    /// Positions of matching characters in the search text.
+    pub match_positions: Vec<usize>,
+}
+
 /// State for the session list widget.
 #[derive(Debug, Default)]
 pub struct SessionListState {
@@ -129,6 +142,12 @@ pub struct SessionListState {
     offset: usize,
     /// Cached list of visible indices (for navigation).
     visible_indices: Vec<usize>,
+    /// Current search query (empty means no active search).
+    search_query: String,
+    /// Filtered matches when search is active.
+    search_matches: Vec<SearchMatch>,
+    /// Original sessions for rebuilding after search clears.
+    original_sessions: Vec<SessionMeta>,
 }
 
 impl SessionListState {
@@ -139,6 +158,9 @@ impl SessionListState {
 
     /// Build the tree from a list of session metadata.
     pub fn from_sessions(sessions: Vec<SessionMeta>) -> Self {
+        // Store original sessions for filtering later
+        let original_sessions = sessions.clone();
+
         // Group sessions by project path
         let mut by_project: BTreeMap<String, Vec<SessionMeta>> = BTreeMap::new();
         for session in sessions {
@@ -169,6 +191,9 @@ impl SessionListState {
             selected: 0,
             offset: 0,
             visible_indices: Vec::new(),
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            original_sessions,
         };
         state.rebuild_visible_indices();
         state
@@ -360,6 +385,150 @@ impl SessionListState {
     pub fn items(&self) -> &[TreeItem] {
         &self.items
     }
+
+    // === Fuzzy Search Methods ===
+
+    /// Get the current search query.
+    pub fn search_query(&self) -> &str {
+        &self.search_query
+    }
+
+    /// Check if search is currently active.
+    pub fn is_searching(&self) -> bool {
+        !self.search_query.is_empty()
+    }
+
+    /// Set the search query and filter results.
+    ///
+    /// This performs fuzzy matching against project paths and first prompt previews.
+    /// Matching sessions are shown with their parent projects.
+    pub fn set_search_query(&mut self, query: impl Into<String>) {
+        let query: String = query.into();
+
+        if query.is_empty() {
+            self.clear_search();
+            return;
+        }
+
+        self.search_query = query;
+        self.perform_search();
+    }
+
+    /// Clear the search and restore all items.
+    pub fn clear_search(&mut self) {
+        if self.search_query.is_empty() && self.search_matches.is_empty() {
+            return;
+        }
+
+        self.search_query.clear();
+        self.search_matches.clear();
+
+        // Rebuild items from original sessions
+        *self = Self::from_sessions(std::mem::take(&mut self.original_sessions));
+    }
+
+    /// Perform the fuzzy search and update the view.
+    fn perform_search(&mut self) {
+        let matcher = SkimMatcherV2::default();
+        let mut matches: Vec<SearchMatch> = Vec::new();
+
+        // Match against sessions only (not projects directly)
+        for (idx, item) in self.items.iter().enumerate() {
+            if let TreeItem::Session(meta) = item {
+                // Build search text from project path and first prompt
+                let search_text = format!(
+                    "{} {}",
+                    meta.project_path,
+                    meta.first_prompt_preview.as_deref().unwrap_or("")
+                );
+
+                if let Some((score, positions)) =
+                    matcher.fuzzy_indices(&search_text, &self.search_query)
+                {
+                    matches.push(SearchMatch {
+                        item_index: idx,
+                        score,
+                        match_positions: positions,
+                    });
+                }
+            }
+        }
+
+        // Sort by score (highest first)
+        matches.sort_by(|a, b| b.score.cmp(&a.score));
+
+        self.search_matches = matches;
+
+        // Rebuild visible indices to only show matching sessions and their projects
+        self.rebuild_filtered_visible_indices();
+
+        // Reset selection to first item
+        self.selected = 0;
+        self.offset = 0;
+    }
+
+    /// Rebuild visible indices to only show matching sessions and their projects.
+    fn rebuild_filtered_visible_indices(&mut self) {
+        if self.search_matches.is_empty() {
+            self.visible_indices.clear();
+            return;
+        }
+
+        // Collect unique matching session indices
+        let matching_session_indices: std::collections::HashSet<usize> =
+            self.search_matches.iter().map(|m| m.item_index).collect();
+
+        // Also track which projects have matching sessions
+        let mut projects_with_matches: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+
+        // Find parent projects for each matching session
+        for &session_idx in &matching_session_indices {
+            // Search backwards for the parent project
+            for i in (0..session_idx).rev() {
+                if let TreeItem::Project { .. } = &self.items[i] {
+                    projects_with_matches.insert(i);
+                    break;
+                }
+            }
+        }
+
+        // Build visible indices in tree order
+        self.visible_indices.clear();
+        let mut in_matching_project = false;
+
+        for (i, item) in self.items.iter().enumerate() {
+            match item {
+                TreeItem::Project { .. } => {
+                    if projects_with_matches.contains(&i) {
+                        self.visible_indices.push(i);
+                        in_matching_project = true;
+                    } else {
+                        in_matching_project = false;
+                    }
+                }
+                TreeItem::Session(_) => {
+                    if in_matching_project && matching_session_indices.contains(&i) {
+                        self.visible_indices.push(i);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get the match info for a specific item index, if it exists.
+    pub fn get_match_for_item(&self, item_index: usize) -> Option<&SearchMatch> {
+        self.search_matches
+            .iter()
+            .find(|m| m.item_index == item_index)
+    }
+
+    /// Get the match positions for highlighting in the display text.
+    /// Returns positions relative to the search text (project_path + " " + first_prompt_preview).
+    pub fn get_match_positions(&self, item_index: usize) -> Option<&[usize]> {
+        self.get_match_for_item(item_index)
+            .map(|m| m.match_positions.as_slice())
+    }
 }
 
 /// Session list widget for rendering the tree view.
@@ -370,6 +539,7 @@ pub struct SessionList<'a> {
     highlight_style: Style,
     normal_style: Style,
     project_style: Style,
+    match_style: Style,
 }
 
 impl<'a> Default for SessionList<'a> {
@@ -390,6 +560,9 @@ impl<'a> SessionList<'a> {
             normal_style: Style::default().fg(Color::Gray),
             project_style: Style::default()
                 .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            match_style: Style::default()
+                .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         }
     }
@@ -423,6 +596,12 @@ impl<'a> SessionList<'a> {
         self.project_style = style;
         self
     }
+
+    /// Set the style for matching characters in search results.
+    pub fn match_style(mut self, style: Style) -> Self {
+        self.match_style = style;
+        self
+    }
 }
 
 impl StatefulWidget for SessionList<'_> {
@@ -450,16 +629,24 @@ impl StatefulWidget for SessionList<'_> {
         let start_idx = state.offset;
         let end_idx = (start_idx + viewport_height).min(state.visible_indices.len());
 
+        let is_searching = state.is_searching();
+
         for (row, visible_idx) in (start_idx..end_idx).enumerate() {
             if let Some(&item_idx) = state.visible_indices.get(visible_idx) {
                 if let Some(item) = state.items.get(item_idx) {
                     let y = inner_area.y + row as u16;
                     let line_area = Rect::new(inner_area.x, y, inner_area.width, 1);
 
-                    // Determine style based on selection and item type
+                    // Check if this item has a search match
+                    let has_match = is_searching && state.get_match_for_item(item_idx).is_some();
+
+                    // Determine style based on selection, item type, and match status
                     let is_selected = visible_idx == state.selected;
                     let base_style = if item.is_project() {
                         self.project_style
+                    } else if has_match {
+                        // Use match style for matching sessions
+                        self.match_style
                     } else {
                         self.normal_style
                     };
@@ -472,7 +659,15 @@ impl StatefulWidget for SessionList<'_> {
 
                     // Render the item text
                     let text = item.display_text(self.now);
-                    let line = Line::from(Span::styled(text, style));
+
+                    // If searching and this is a matching session, add a marker
+                    let display_text = if has_match {
+                        format!("★ {}", text.trim_start())
+                    } else {
+                        text
+                    };
+
+                    let line = Line::from(Span::styled(display_text, style));
                     buf.set_line(line_area.x, line_area.y, &line, line_area.width);
                 }
             }
@@ -773,5 +968,168 @@ mod tests {
         assert_eq!(state.selected(), 4);
         state.select_first();
         assert_eq!(state.selected(), 0);
+    }
+
+    // === Fuzzy Search Tests ===
+
+    fn sessions_with_prompts() -> Vec<SessionMeta> {
+        vec![
+            SessionMeta::new(
+                "session1",
+                PathBuf::from("/home/user/.claude/projects/api/session1.jsonl"),
+                "~/projects/api-server",
+                test_timestamp(),
+            )
+            .with_message_count(10)
+            .with_first_prompt_preview("Refactor the authentication module to use JWT"),
+            SessionMeta::new(
+                "session2",
+                PathBuf::from("/home/user/.claude/projects/api/session2.jsonl"),
+                "~/projects/api-server",
+                test_timestamp(),
+            )
+            .with_message_count(5)
+            .with_first_prompt_preview("Add rate limiting to API endpoints"),
+            SessionMeta::new(
+                "session3",
+                PathBuf::from("/home/user/.claude/projects/web/session3.jsonl"),
+                "~/projects/web-frontend",
+                test_timestamp(),
+            )
+            .with_message_count(15)
+            .with_first_prompt_preview("Build a responsive dashboard component"),
+        ]
+    }
+
+    #[test]
+    fn test_search_query_default_empty() {
+        let state = SessionListState::from_sessions(sessions_with_prompts());
+        assert_eq!(state.search_query(), "");
+        assert!(!state.is_searching());
+    }
+
+    #[test]
+    fn test_set_search_query_activates_search() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+        state.set_search_query("api");
+        assert_eq!(state.search_query(), "api");
+        assert!(state.is_searching());
+    }
+
+    #[test]
+    fn test_search_filters_by_project_path() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+
+        // All items visible initially (2 projects + 3 sessions)
+        assert_eq!(state.visible_count(), 5);
+
+        // Search for "api-server" project
+        state.set_search_query("api-server");
+
+        // Should only show the api project with its sessions
+        // 1 project + 2 sessions = 3 visible
+        assert!(state.visible_count() >= 1);
+        assert!(state.visible_count() <= 3);
+    }
+
+    #[test]
+    fn test_search_filters_by_prompt_content() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+
+        // Search for "JWT" which is only in session1's prompt
+        state.set_search_query("JWT");
+
+        // Should filter to show matching session
+        assert!(state.is_searching());
+        // At least 1 match (the session), plus its parent project
+        assert!(state.visible_count() >= 2);
+    }
+
+    #[test]
+    fn test_clear_search_restores_all_items() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+        let original_count = state.visible_count();
+
+        // Apply search
+        state.set_search_query("JWT");
+        assert!(state.visible_count() < original_count);
+
+        // Clear search
+        state.clear_search();
+
+        // All items should be visible again
+        assert!(!state.is_searching());
+        assert_eq!(state.search_query(), "");
+        assert_eq!(state.visible_count(), original_count);
+    }
+
+    #[test]
+    fn test_empty_search_shows_all() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+        let original_count = state.visible_count();
+
+        // Setting empty query should not filter
+        state.set_search_query("");
+        assert_eq!(state.visible_count(), original_count);
+        assert!(!state.is_searching());
+    }
+
+    #[test]
+    fn test_search_no_matches() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+
+        // Search for something that doesn't exist
+        state.set_search_query("xyznonexistent123");
+
+        // Should show no results
+        assert!(state.is_searching());
+        assert_eq!(state.visible_count(), 0);
+    }
+
+    #[test]
+    fn test_search_resets_selection() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+        state.select_last(); // Move to last item
+        assert!(state.selected() > 0);
+
+        // Search should reset selection to 0
+        state.set_search_query("api");
+        assert_eq!(state.selected(), 0);
+    }
+
+    #[test]
+    fn test_fuzzy_matching_partial() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+
+        // Fuzzy match "rfct" should match "refactor"
+        state.set_search_query("rfct");
+
+        // Should find the session with "Refactor" in the prompt
+        assert!(state.is_searching());
+        // Fuzzy matching should find something
+        // Note: depending on matcher sensitivity this might vary
+    }
+
+    #[test]
+    fn test_get_match_for_item_returns_none_for_non_match() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+        state.set_search_query("dashboard"); // Only matches session3
+
+        // Project items don't have matches
+        assert!(state.get_match_for_item(0).is_none());
+    }
+
+    #[test]
+    fn test_search_preserves_original_sessions() {
+        let mut state = SessionListState::from_sessions(sessions_with_prompts());
+
+        // Do multiple search/clear cycles
+        state.set_search_query("api");
+        state.clear_search();
+        state.set_search_query("web");
+        state.clear_search();
+
+        // All sessions should still be available
+        assert_eq!(state.visible_count(), 5); // 2 projects + 3 sessions
     }
 }

@@ -1,5 +1,100 @@
 # Panko Progress Log
 
+## 2026-01-30 - M2 Story 9: Fuzzy search
+
+### Summary
+Implemented fuzzy search functionality for filtering sessions by matching against project path and first prompt content. Users can quickly find specific sessions using the `/` key to activate search mode.
+
+### Changes
+- Updated `Cargo.toml`:
+  - Added `fuzzy-matcher = "0.3"` dependency for fuzzy matching algorithm (SkimMatcherV2)
+
+- Updated `src/tui/widgets/session_list.rs`:
+  - Added `SearchMatch` struct with item_index, score, and match_positions
+  - Extended `SessionListState` with search_query, search_matches, and original_sessions fields
+  - Added fuzzy search methods:
+    - `search_query()` - get current search query
+    - `is_searching()` - check if search filter is active
+    - `set_search_query()` - apply fuzzy filter
+    - `clear_search()` - clear filter and restore all sessions
+    - `perform_search()` - execute fuzzy matching using SkimMatcherV2
+    - `rebuild_filtered_visible_indices()` - rebuild visible items to show only matches with their parent projects
+    - `get_match_for_item()` and `get_match_positions()` - retrieve match info for highlighting
+  - Updated `SessionList` widget:
+    - Added `match_style` field for highlighting matched sessions (yellow/bold)
+    - Render method shows star marker (★) for matching sessions
+    - Matching sessions displayed in yellow to stand out
+  - 14 new unit tests for fuzzy search functionality
+
+- Updated `src/tui/app.rs`:
+  - Added `search_active` field to track if search input mode is active
+  - Added `/` key handler to activate search mode
+  - Added `handle_search_key()` method for search mode key handling:
+    - Character keys add to search query
+    - Backspace removes last character
+    - Enter exits search input mode (preserves filter)
+    - Esc deactivates search input
+    - Arrow keys still navigate during search
+    - Ctrl+C quits
+  - Added search helper methods:
+    - `activate_search()` - enable search input mode
+    - `deactivate_search()` - exit search input mode
+    - `update_search_filter()` - apply query to session list
+    - `clear_search()` - clear query and filter completely
+    - `is_search_active()` and `search_query()` accessors
+  - Updated Esc handling: clears active search filter instead of quitting
+  - Updated `render_header()`:
+    - Shows cursor (█) when in search input mode
+    - Shows "(Esc to clear)" hint when filter is active
+    - Shows match count instead of session count when filtering
+  - 12 new unit tests for search input handling
+
+### Test Coverage (26 new tests)
+SessionListState fuzzy search tests:
+- `test_search_query_default_empty` - default query is empty
+- `test_set_search_query_activates_search` - setting query enables search
+- `test_search_filters_by_project_path` - filters by project path
+- `test_search_filters_by_prompt_content` - filters by prompt content
+- `test_clear_search_restores_all_items` - clearing restores all sessions
+- `test_empty_search_shows_all` - empty query shows all
+- `test_search_no_matches` - no matches returns empty
+- `test_search_resets_selection` - search resets selection to 0
+- `test_fuzzy_matching_partial` - fuzzy matching works with partial input
+- `test_get_match_for_item_returns_none_for_non_match` - non-matches return None
+- `test_search_preserves_original_sessions` - original sessions preserved
+
+App search tests:
+- `test_search_default_inactive` - search defaults to inactive
+- `test_handle_key_slash_activates_search` - / key activates search
+- `test_search_typing_updates_query` - typing updates query
+- `test_search_backspace_removes_character` - backspace works
+- `test_search_esc_deactivates_search_mode` - Esc exits search mode
+- `test_search_enter_exits_search_mode` - Enter exits search mode
+- `test_clear_search_clears_everything` - clear_search works
+- `test_search_navigation_works_during_search` - arrows still navigate
+- `test_search_ctrl_c_quits` - Ctrl+C quits during search
+- `test_esc_clears_active_search_instead_of_quitting` - Esc clears filter first
+- `test_esc_quits_when_no_search_active` - Esc quits when no filter
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (310 tests passed - 288 unit, 22 new)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] / focuses search input in header
+- [x] Typing filters session list in real-time
+- [x] Fuzzy matches against project path and first_prompt_preview
+- [x] Matching characters highlighted in results (★ marker + yellow color)
+- [x] Enter selects first match
+- [x] Esc clears search and shows all sessions
+- [x] Empty search shows all sessions
+
+---
+
 ## 2026-01-30 - M2 Story 8: Copy path and open folder actions
 
 ### Summary

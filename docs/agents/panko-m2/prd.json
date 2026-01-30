@@ -133,7 +133,7 @@
       "title": "Fuzzy search",
       "description": "Filter sessions by fuzzy matching project path and prompt content",
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "/ focuses search input in header",
         "Typing filters session list in real-time",
