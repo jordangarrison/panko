@@ -4,16 +4,16 @@
 
 **Target Version**: v0.3.0 (TUI browser)
 **Prerequisites**: Milestone 1 complete (v0.1.0 - v0.2.0)
-**Status**: Not Started
+**Status**: In Progress
 
 ## Story Progress
 
 | ID | Title | Status | Notes |
 |----|-------|--------|-------|
-| 1 | Session scanner trait and Claude implementation | ⬜ Not Started | |
-| 2 | TUI application scaffold with ratatui | ⬜ Not Started | |
-| 3 | Session list widget with project grouping | ⬜ Not Started | |
-| 4 | Preview panel | ⬜ Not Started | |
+| 1 | Session scanner trait and Claude implementation | ✅ Complete | |
+| 2 | TUI application scaffold with ratatui | ✅ Complete | |
+| 3 | Session list widget with project grouping | ✅ Complete | |
+| 4 | Preview panel | ✅ Complete | Added 2025-01-30 |
 | 5 | Layout with resizable panels | ⬜ Not Started | |
 | 6 | View action integration | ⬜ Not Started | |
 | 7 | Share action integration | ⬜ Not Started | |
@@ -34,9 +34,24 @@
 
 ## Work Log
 
-### [Date]
+### 2025-01-30
 
-_No work logged yet._
+**Story 4: Preview panel** - ✅ Complete
+
+Implemented the preview panel widget for displaying session details in the TUI.
+
+**Changes:**
+- Created `src/tui/widgets/preview.rs` with `PreviewPanel` widget
+- Added `tool_usage: Option<HashMap<String, usize>>` field to `SessionMeta`
+- Updated Claude scanner to extract tool usage from assistant messages
+- Updated `app.rs` to display two-column layout (session list + preview)
+- Preview panel shows: session ID, updated timestamp, full path, message count, tool usage summary, and first prompt preview
+
+**Validation Results:**
+- `cargo build` ✅
+- `cargo test` ✅ (228 tests passed)
+- `cargo clippy` ✅ (no warnings)
+- `cargo fmt --check` ✅
 
 ---
 

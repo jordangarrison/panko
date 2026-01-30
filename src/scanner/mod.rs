@@ -9,6 +9,7 @@ mod claude;
 pub use claude::ClaudeScanner;
 
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -30,6 +31,8 @@ pub struct SessionMeta {
     pub message_count: usize,
     /// Preview of the first user prompt (truncated to ~100 chars).
     pub first_prompt_preview: Option<String>,
+    /// Tool usage counts (tool name -> count).
+    pub tool_usage: Option<HashMap<String, usize>>,
 }
 
 impl SessionMeta {
@@ -47,6 +50,7 @@ impl SessionMeta {
             updated_at,
             message_count: 0,
             first_prompt_preview: None,
+            tool_usage: None,
         }
     }
 
@@ -59,6 +63,12 @@ impl SessionMeta {
     /// Set the first prompt preview.
     pub fn with_first_prompt_preview(mut self, preview: impl Into<String>) -> Self {
         self.first_prompt_preview = Some(preview.into());
+        self
+    }
+
+    /// Set the tool usage counts.
+    pub fn with_tool_usage(mut self, tool_usage: HashMap<String, usize>) -> Self {
+        self.tool_usage = Some(tool_usage);
         self
     }
 }

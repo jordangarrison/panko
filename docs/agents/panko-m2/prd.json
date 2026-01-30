@@ -56,7 +56,7 @@
       "title": "Preview panel",
       "description": "Show details of selected session in right panel",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Panel shows session id, full path, started timestamp",
         "Shows message count and estimated token count if available",

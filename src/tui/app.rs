@@ -1,7 +1,7 @@
 //! Application state management for the TUI.
 
 use crate::scanner::{ClaudeScanner, SessionMeta, SessionScanner};
-use crate::tui::widgets::{SessionList, SessionListState};
+use crate::tui::widgets::{PreviewPanel, SessionList, SessionListState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     prelude::*,
@@ -210,8 +210,21 @@ impl App {
         frame.render_widget(paragraph, inner);
     }
 
-    /// Render the main content area (session list).
+    /// Render the main content area (session list and preview panel).
     fn render_content(&mut self, frame: &mut Frame, area: Rect) {
+        // Split into two columns: session list (left) and preview (right)
+        let chunks = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+
+        // Render session list on the left
+        self.render_session_list(frame, chunks[0]);
+
+        // Render preview panel on the right
+        self.render_preview(frame, chunks[1]);
+    }
+
+    /// Render the session list panel.
+    fn render_session_list(&mut self, frame: &mut Frame, area: Rect) {
         if self.session_list_state.is_empty() {
             // Show empty state message
             let block = Block::default()
@@ -270,6 +283,29 @@ impl App {
 
             frame.render_stateful_widget(widget, area, &mut self.session_list_state);
         }
+    }
+
+    /// Render the preview panel.
+    fn render_preview(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .title(" Preview ")
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded);
+
+        let selected_session = self.selected_session();
+
+        let widget = PreviewPanel::new()
+            .block(block)
+            .session(selected_session)
+            .label_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .value_style(Style::default().fg(Color::White))
+            .prompt_style(Style::default().fg(Color::Gray));
+
+        frame.render_widget(widget, area);
     }
 
     /// Render the footer with keyboard hints.
