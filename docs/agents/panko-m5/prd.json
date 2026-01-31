@@ -8,7 +8,7 @@
       "title": "Create daemon module structure",
       "description": "Set up the src/daemon/ module with protocol types for IPC communication",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/mod.rs with module exports",
         "Create src/daemon/protocol.rs with ShareId (UUID), DaemonRequest, DaemonResponse enums",
