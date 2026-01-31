@@ -1,0 +1,131 @@
+{
+  "name": "panko",
+  "branchName": "feature/daemon-sharing",
+  "description": "Daemon-based sharing with SQLite persistence - shares survive TUI restarts",
+  "stories": [
+    {
+      "id": "1",
+      "title": "Create daemon module structure",
+      "description": "Set up the src/daemon/ module with protocol types for IPC communication",
+      "priority": 1,
+      "passes": false,
+      "acceptance_criteria": [
+        "Create src/daemon/mod.rs with module exports",
+        "Create src/daemon/protocol.rs with ShareId (UUID), DaemonRequest, DaemonResponse enums",
+        "Add serde Serialize/Deserialize for all protocol types",
+        "Add rusqlite and uuid to Cargo.toml",
+        "cargo build passes"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "2",
+      "title": "Implement SQLite persistence layer",
+      "description": "Create database module for share state persistence",
+      "priority": 2,
+      "passes": false,
+      "acceptance_criteria": [
+        "Create src/daemon/db.rs with Database struct",
+        "Implement create_tables() for schema initialization",
+        "Implement insert_share(), update_share(), delete_share()",
+        "Implement get_share(), list_shares()",
+        "Database location: ~/.local/share/panko/state.db",
+        "Unit tests for all CRUD operations"
+      ],
+      "depends_on": ["1"]
+    },
+    {
+      "id": "3",
+      "title": "Implement daemon server",
+      "description": "Create the main daemon process that handles IPC and manages shares",
+      "priority": 3,
+      "passes": false,
+      "acceptance_criteria": [
+        "Create src/daemon/server.rs with DaemonServer struct",
+        "Bind Unix socket at ~/.local/share/panko/daemon.sock",
+        "Accept connections and handle JSON-framed requests",
+        "Dispatch to handlers: StartShare, StopShare, ListShares, Ping, Shutdown",
+        "Graceful shutdown on SIGTERM/SIGINT",
+        "Write PID file at ~/.local/share/panko/daemon.pid"
+      ],
+      "depends_on": ["2"]
+    },
+    {
+      "id": "4",
+      "title": "Implement share service",
+      "description": "Port sharing logic from TUI threads to daemon service",
+      "priority": 4,
+      "passes": false,
+      "acceptance_criteria": [
+        "Create src/daemon/share_service.rs with ShareService struct",
+        "start_share() spawns server + tunnel, returns ShareInfo",
+        "stop_share() gracefully stops server and tunnel",
+        "Persist share state to SQLite on start/stop",
+        "Handle tunnel provider configuration from config.toml"
+      ],
+      "depends_on": ["3"]
+    },
+    {
+      "id": "5",
+      "title": "Add serve command to CLI",
+      "description": "Add panko serve subcommand to run the daemon",
+      "priority": 5,
+      "passes": false,
+      "acceptance_criteria": [
+        "Add Serve subcommand with --foreground flag",
+        "Add ServeStop subcommand",
+        "Add ServeStatus subcommand",
+        "panko serve starts daemon (daemonizes by default)",
+        "panko serve --foreground runs in foreground",
+        "panko serve-stop sends shutdown to daemon",
+        "panko serve-status shows running/stopped and active share count"
+      ],
+      "depends_on": ["4"]
+    },
+    {
+      "id": "6",
+      "title": "Implement daemon client",
+      "description": "Create client library for TUI to communicate with daemon",
+      "priority": 6,
+      "passes": false,
+      "acceptance_criteria": [
+        "Create src/daemon/client.rs with DaemonClient struct",
+        "connect() connects to existing daemon socket",
+        "connect_or_start() auto-starts daemon if not running",
+        "start_share(), stop_share(), list_shares() high-level methods",
+        "Proper error handling for connection failures"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "7",
+      "title": "Integrate daemon client into TUI",
+      "description": "Replace thread-based sharing with daemon IPC",
+      "priority": 7,
+      "passes": false,
+      "acceptance_criteria": [
+        "TUI auto-starts daemon on launch if not running",
+        "Action::StartSharing uses DaemonClient instead of SharingHandle",
+        "ShareManager becomes thin wrapper reading from daemon",
+        "Shares panel shows shares from daemon",
+        "Stop share sends command to daemon",
+        "All existing sharing tests pass or are updated"
+      ],
+      "depends_on": ["6"]
+    },
+    {
+      "id": "8",
+      "title": "Handle reconnection and recovery",
+      "description": "TUI reconnects to existing shares on restart",
+      "priority": 8,
+      "passes": false,
+      "acceptance_criteria": [
+        "On TUI start, fetch existing shares from daemon",
+        "Display reconnected shares in shares panel",
+        "Handle daemon not running gracefully (show message, offer to start)",
+        "Handle daemon crash (detect, show error, allow restart)"
+      ],
+      "depends_on": ["7"]
+    }
+  ]
+}
