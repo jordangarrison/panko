@@ -1505,7 +1505,10 @@ impl App {
         if self.use_daemon_sharing {
             // For daemon shares, convert to ActiveShare format for the widget
             let shares = self.get_all_shares_as_active();
+            // Sync selection from daemon manager before rendering
+            let selected = self.daemon_share_manager.selected_index();
             self.shares_panel_state.update(&shares);
+            self.shares_panel_state.set_selected(selected);
             let widget = SharesPanel::new(&shares);
             frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
         } else {

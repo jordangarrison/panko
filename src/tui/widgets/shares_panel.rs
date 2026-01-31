@@ -51,6 +51,15 @@ impl SharesPanelState {
         self.selected
     }
 
+    /// Set the selected index.
+    pub fn set_selected(&mut self, index: usize) {
+        self.selected = index;
+        if self.share_count > 0 {
+            self.list_state
+                .select(Some(index.min(self.share_count.saturating_sub(1))));
+        }
+    }
+
     /// Check if the list is empty.
     pub fn is_empty(&self) -> bool {
         self.share_count == 0

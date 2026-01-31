@@ -270,6 +270,11 @@ impl DaemonShareManager {
         }
     }
 
+    /// Get the currently selected index
+    pub fn selected_index(&self) -> usize {
+        self.selected_index
+    }
+
     /// Clear all shares (for shutdown)
     pub fn clear(&mut self) {
         self.shares.clear();
