@@ -89,7 +89,7 @@
       "title": "Sub-agent flow visualization (web UI)",
       "description": "Display sub-agent spawns and their outputs in a threaded/nested view",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Sub-agent blocks visually indented or in collapsible section",
         "Shows agent type badge (Explore, Plan, Bash, etc.)",

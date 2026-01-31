@@ -1,5 +1,57 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 6: Sub-agent flow visualization (web UI)
+
+### Summary
+Added sub-agent flow visualization to the web viewer. Sub-agent spawn blocks now display in a visually distinct, indented style with type badges, expandable prompts and results, and connector lines showing the parent→child relationship.
+
+### Changes
+- Updated `src/server/templates.rs`:
+  - Added `agent_result` field to `BlockView` struct
+  - Created `from_block_with_agents()` method to look up sub-agent results from session metadata
+  - Updated `SessionView::from_session()` to pass sub_agents for result lookup
+  - 6 new unit tests for sub-agent rendering
+
+- Updated `templates/session.html`:
+  - Added `sub_agent_spawn` block type rendering
+  - Shows agent type badge (Explore, Plan, Bash, general-purpose)
+  - Shows agent status indicator (running, completed, failed)
+  - Expandable `<details>` sections for full prompt and result
+  - Visual connector lines using CSS pseudo-elements
+  - Copy button for copying result to clipboard
+
+- Updated `src/assets/styles.css`:
+  - Added `.block-sub-agent` styles with visual indentation (margin-left: 2rem)
+  - Added agent type badges with color coding per type
+  - Added status indicators (running=blue, completed=green, failed=red)
+  - Added connector line styles using `::before` and `::after` pseudo-elements
+  - Added sub-agent prompt and result container styles
+  - Added error styling for failed sub-agent results
+
+### Test Coverage (6 new tests)
+- `test_block_view_sub_agent_spawn_basic` - basic sub-agent rendering
+- `test_block_view_sub_agent_with_result` - completed agent with result lookup
+- `test_block_view_sub_agent_failed` - failed agent rendering
+- `test_session_view_with_sub_agents` - session with sub-agent metadata
+- `test_render_session_with_sub_agent` - full HTML rendering
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (470 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Sub-agent blocks visually indented or in collapsible section
+- [x] Shows agent type badge (Explore, Plan, Bash, etc.)
+- [x] Expandable to see sub-agent's full prompt and results
+- [x] Visual connector lines showing parent→child relationship
+- [x] Option to 'View sub-agent in detail' (expands inline)
+
+---
+
 ## 2026-01-30 - M3 Story 5: Parse Task tool for sub-agent tracking
 
 ### Summary

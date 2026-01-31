@@ -147,6 +147,192 @@ body {
     color: var(--accent-file);
 }
 
+/* Sub-agent block styles */
+.block-sub-agent {
+    background: var(--bg-secondary);
+    border-left: 3px solid #06b6d4; /* cyan for sub-agents */
+    margin-left: 2rem; /* Visual indentation for nested agents */
+}
+
+.block-sub-agent .block-label {
+    color: #06b6d4;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Agent type badges */
+.agent-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.agent-badge-explore {
+    background: #3b82f6;
+    color: white;
+}
+
+.agent-badge-plan {
+    background: #8b5cf6;
+    color: white;
+}
+
+.agent-badge-bash {
+    background: #f59e0b;
+    color: white;
+}
+
+.agent-badge-general-purpose {
+    background: #10b981;
+    color: white;
+}
+
+/* Fallback for unknown agent types */
+.agent-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+/* Agent status indicators */
+.agent-status {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.agent-status-running {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+}
+
+.agent-status-completed {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.agent-status-failed {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+/* Sub-agent content layout with connector */
+.sub-agent-content {
+    display: flex;
+    position: relative;
+}
+
+.sub-agent-connector {
+    width: 24px;
+    flex-shrink: 0;
+    position: relative;
+}
+
+/* Visual connector line */
+.sub-agent-connector::before {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom, #06b6d4 0%, var(--border-color) 100%);
+}
+
+.sub-agent-connector::after {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 16px;
+    width: 12px;
+    height: 2px;
+    background: #06b6d4;
+}
+
+.sub-agent-body {
+    flex-grow: 1;
+    padding: 1rem;
+    padding-left: 0.5rem;
+}
+
+.sub-agent-description {
+    font-weight: 500;
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+}
+
+/* Sub-agent details (prompt and result) */
+.sub-agent-details {
+    margin-top: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.sub-agent-details summary {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    list-style: none;
+}
+
+.sub-agent-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.sub-agent-details summary::before {
+    content: "▶";
+    display: inline-block;
+    margin-right: 0.5rem;
+    transition: transform 0.15s ease;
+    font-size: 0.7rem;
+}
+
+.sub-agent-details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.sub-agent-details summary:hover {
+    background: var(--border-color);
+}
+
+.sub-agent-prompt {
+    padding: 1rem;
+    background: var(--code-bg);
+    font-size: 0.875rem;
+}
+
+.sub-agent-result {
+    padding: 0;
+    background: var(--code-bg);
+}
+
+.sub-agent-result pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.sub-agent-result-error {
+    border-left: 3px solid #ef4444;
+}
+
+.sub-agent-result-error pre {
+    color: #fca5a5;
+}
+
 /* Tool details */
 .tool-details {
     margin: 0;

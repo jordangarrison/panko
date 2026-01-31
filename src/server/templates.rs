@@ -5,7 +5,7 @@ use pulldown_cmark::{html, Options, Parser};
 use rust_embed::Embed;
 use serde::Serialize;
 
-use crate::parser::{Block, Session};
+use crate::parser::{Block, Session, SubAgentMeta};
 
 /// Embedded HTML templates.
 #[derive(Embed)]
@@ -65,7 +65,11 @@ impl SessionView {
             id: session.id.clone(),
             project: session.project.clone(),
             started_at: session.started_at.to_rfc3339(),
-            blocks: session.blocks.iter().map(BlockView::from_block).collect(),
+            blocks: session
+                .blocks
+                .iter()
+                .map(|block| BlockView::from_block_with_agents(block, &session.sub_agents))
+                .collect(),
         }
     }
 }
@@ -114,11 +118,14 @@ pub struct BlockView {
     /// Sub-agent status (for SubAgentSpawn).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_status: Option<String>,
+    /// Sub-agent result (for SubAgentSpawn, looked up from session.sub_agents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_result: Option<String>,
 }
 
 impl BlockView {
-    /// Create a view model from a block.
-    pub fn from_block(block: &Block) -> Self {
+    /// Create a view model from a block with access to sub-agent metadata.
+    pub fn from_block_with_agents(block: &Block, sub_agents: &[SubAgentMeta]) -> Self {
         match block {
             Block::UserPrompt { content, timestamp } => Self {
                 block_type: "user_prompt".to_string(),
@@ -135,6 +142,7 @@ impl BlockView {
                 description: None,
                 prompt: None,
                 agent_status: None,
+                agent_result: None,
             },
             Block::AssistantResponse { content, timestamp } => Self {
                 block_type: "assistant_response".to_string(),
@@ -151,6 +159,7 @@ impl BlockView {
                 description: None,
                 prompt: None,
                 agent_status: None,
+                agent_result: None,
             },
             Block::Thinking { content, timestamp } => Self {
                 block_type: "thinking".to_string(),
@@ -167,6 +176,7 @@ impl BlockView {
                 description: None,
                 prompt: None,
                 agent_status: None,
+                agent_result: None,
             },
             Block::ToolCall {
                 name,
@@ -205,6 +215,7 @@ impl BlockView {
                     description: None,
                     prompt: None,
                     agent_status: None,
+                    agent_result: None,
                 }
             }
             Block::FileEdit {
@@ -226,6 +237,7 @@ impl BlockView {
                 description: None,
                 prompt: None,
                 agent_status: None,
+                agent_result: None,
             },
             Block::SubAgentSpawn {
                 agent_id,
@@ -234,23 +246,37 @@ impl BlockView {
                 prompt,
                 status,
                 timestamp,
-            } => Self {
-                block_type: "sub_agent_spawn".to_string(),
-                timestamp: timestamp.to_rfc3339(),
-                content_html: Some(markdown_to_html(prompt)),
-                name: None,
-                input: None,
-                output: None,
-                output_lines: None,
-                path: None,
-                diff: None,
-                agent_id: Some(agent_id.clone()),
-                agent_type: Some(agent_type.clone()),
-                description: Some(description.clone()),
-                prompt: Some(prompt.clone()),
-                agent_status: Some(format!("{:?}", status).to_lowercase()),
-            },
+            } => {
+                // Look up the result from sub_agents if available
+                let agent_result = sub_agents
+                    .iter()
+                    .find(|a| a.id == *agent_id)
+                    .and_then(|a| a.result.clone());
+
+                Self {
+                    block_type: "sub_agent_spawn".to_string(),
+                    timestamp: timestamp.to_rfc3339(),
+                    content_html: Some(markdown_to_html(prompt)),
+                    name: None,
+                    input: None,
+                    output: None,
+                    output_lines: None,
+                    path: None,
+                    diff: None,
+                    agent_id: Some(agent_id.clone()),
+                    agent_type: Some(agent_type.clone()),
+                    description: Some(description.clone()),
+                    prompt: Some(prompt.clone()),
+                    agent_status: Some(format!("{:?}", status).to_lowercase()),
+                    agent_result,
+                }
+            }
         }
+    }
+
+    /// Create a view model from a block (without sub-agent metadata lookup).
+    pub fn from_block(block: &Block) -> Self {
+        Self::from_block_with_agents(block, &[])
     }
 }
 
@@ -443,5 +469,180 @@ mod tests {
         assert!(html.contains("test-session"));
         assert!(html.contains("test-project"));
         assert!(html.contains("<strong>world</strong>"));
+    }
+
+    #[test]
+    fn test_block_view_sub_agent_spawn_basic() {
+        use crate::parser::SubAgentStatus;
+
+        let ts = test_timestamp();
+        let block = Block::sub_agent_spawn(
+            "agent-123",
+            "Explore",
+            "Search codebase",
+            "Find all entry points in the project",
+            SubAgentStatus::Running,
+            ts,
+        );
+        let view = BlockView::from_block(&block);
+
+        assert_eq!(view.block_type, "sub_agent_spawn");
+        assert_eq!(view.agent_id, Some("agent-123".to_string()));
+        assert_eq!(view.agent_type, Some("Explore".to_string()));
+        assert_eq!(view.description, Some("Search codebase".to_string()));
+        assert_eq!(
+            view.prompt,
+            Some("Find all entry points in the project".to_string())
+        );
+        assert_eq!(view.agent_status, Some("running".to_string()));
+        assert!(view.agent_result.is_none()); // No result when using from_block without agents
+        assert!(view.content_html.is_some()); // Prompt should be rendered as markdown
+    }
+
+    #[test]
+    fn test_block_view_sub_agent_with_result() {
+        use crate::parser::SubAgentStatus;
+
+        let ts = test_timestamp();
+        let block = Block::sub_agent_spawn(
+            "agent-456",
+            "Plan",
+            "Design implementation",
+            "Create a plan for adding authentication",
+            SubAgentStatus::Completed,
+            ts,
+        );
+
+        // Create matching sub-agent metadata with a result
+        let mut meta = SubAgentMeta::new(
+            "agent-456",
+            "Plan",
+            "Design implementation",
+            "Create a plan for adding authentication",
+            ts,
+        );
+        meta.complete("Step 1: Add login route\nStep 2: Implement JWT", ts);
+
+        let view = BlockView::from_block_with_agents(&block, &[meta]);
+
+        assert_eq!(view.block_type, "sub_agent_spawn");
+        assert_eq!(view.agent_status, Some("completed".to_string()));
+        assert_eq!(
+            view.agent_result,
+            Some("Step 1: Add login route\nStep 2: Implement JWT".to_string())
+        );
+    }
+
+    #[test]
+    fn test_block_view_sub_agent_failed() {
+        use crate::parser::SubAgentStatus;
+
+        let ts = test_timestamp();
+        let block = Block::sub_agent_spawn(
+            "agent-789",
+            "general-purpose",
+            "Implement feature",
+            "Write the authentication module",
+            SubAgentStatus::Failed,
+            ts,
+        );
+
+        let mut meta = SubAgentMeta::new(
+            "agent-789",
+            "general-purpose",
+            "Implement feature",
+            "Write the authentication module",
+            ts,
+        );
+        meta.fail("Timeout: Task exceeded time limit", ts);
+
+        let view = BlockView::from_block_with_agents(&block, &[meta]);
+
+        assert_eq!(view.agent_status, Some("failed".to_string()));
+        assert_eq!(
+            view.agent_result,
+            Some("Timeout: Task exceeded time limit".to_string())
+        );
+    }
+
+    #[test]
+    fn test_session_view_with_sub_agents() {
+        use crate::parser::SubAgentStatus;
+
+        let ts = test_timestamp();
+        let mut session = Session::new("test-session", ts);
+
+        // Add a sub-agent spawn block
+        session.add_block(Block::sub_agent_spawn(
+            "agent-1",
+            "Explore",
+            "Explore codebase",
+            "Find main entry points",
+            SubAgentStatus::Completed,
+            ts,
+        ));
+
+        // Add matching sub-agent metadata
+        let mut meta = SubAgentMeta::new(
+            "agent-1",
+            "Explore",
+            "Explore codebase",
+            "Find main entry points",
+            ts,
+        );
+        meta.complete("Found src/main.rs and src/lib.rs", ts);
+        session.sub_agents.push(meta);
+
+        let view = SessionView::from_session(&session);
+
+        assert_eq!(view.blocks.len(), 1);
+        let block_view = &view.blocks[0];
+        assert_eq!(block_view.block_type, "sub_agent_spawn");
+        assert_eq!(
+            block_view.agent_result,
+            Some("Found src/main.rs and src/lib.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_render_session_with_sub_agent() {
+        use crate::parser::SubAgentStatus;
+
+        let ts = test_timestamp();
+        let mut session = Session::new("test-session", ts).with_project("test-project");
+
+        session.add_block(Block::user_prompt("Help me explore", ts));
+        session.add_block(Block::sub_agent_spawn(
+            "agent-1",
+            "Explore",
+            "Explore codebase",
+            "Find **important** files",
+            SubAgentStatus::Completed,
+            ts,
+        ));
+
+        let mut meta = SubAgentMeta::new(
+            "agent-1",
+            "Explore",
+            "Explore codebase",
+            "Find **important** files",
+            ts,
+        );
+        meta.complete("Found main.rs", ts);
+        session.sub_agents.push(meta);
+
+        let engine = TemplateEngine::new().unwrap();
+        let html = engine.render_session(&session);
+
+        assert!(html.is_ok(), "render_session failed: {:?}", html.err());
+        let html = html.unwrap();
+
+        // Check sub-agent block is rendered
+        assert!(html.contains("block-sub-agent"));
+        assert!(html.contains("sub_agent_spawn"));
+        assert!(html.contains("Explore")); // Agent type badge
+        assert!(html.contains("Explore codebase")); // Description
+        assert!(html.contains("Found main.rs")); // Result
+        assert!(html.contains("<strong>important</strong>")); // Markdown in prompt
     }
 }

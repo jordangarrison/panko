@@ -101,6 +101,43 @@
             </div>
             <pre class="diff"><code>{{ block.diff }}</code></pre>
         </article>
+
+        {% elif block.type == "sub_agent_spawn" %}
+        <article class="block block-sub-agent" data-type="sub_agent_spawn" data-agent-status="{{ block.agent_status }}" tabindex="0">
+            <div class="block-header">
+                <span class="block-label">
+                    <span class="agent-badge agent-badge-{{ block.agent_type | lower | replace(" ", "-") }}">{{ block.agent_type }}</span>
+                    Sub-Agent
+                </span>
+                <span class="agent-status agent-status-{{ block.agent_status }}">{{ block.agent_status }}</span>
+                <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
+            </div>
+            <div class="sub-agent-content">
+                <div class="sub-agent-connector"></div>
+                <div class="sub-agent-body">
+                    <div class="sub-agent-description">{{ block.description }}</div>
+                    <details class="sub-agent-details">
+                        <summary>
+                            <span class="summary-text">Full Prompt</span>
+                        </summary>
+                        <div class="sub-agent-prompt">
+                            {{ block.content_html | safe }}
+                        </div>
+                    </details>
+                    {% if block.agent_result %}
+                    <details class="sub-agent-details" open>
+                        <summary>
+                            <span class="summary-text">Result</span>
+                            <button type="button" class="copy-btn" data-copy-target="result" title="Copy to clipboard">Copy</button>
+                        </summary>
+                        <div class="sub-agent-result{% if block.agent_status == 'failed' %} sub-agent-result-error{% endif %}">
+                            <pre><code>{{ block.agent_result }}</code></pre>
+                        </div>
+                    </details>
+                    {% endif %}
+                </div>
+            </div>
+        </article>
         {% endif %}
         {% endfor %}
     </main>
