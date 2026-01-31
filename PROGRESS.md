@@ -1,5 +1,59 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 2: Fix tool output rendering in web UI
+
+### Summary
+Improved tool call rendering in the web viewer to display JSON inputs/outputs in a readable, syntax-highlighted format with copy functionality and smart handling of large outputs.
+
+### Changes
+- Updated `templates/session.html`:
+  - Tool inputs now display as formatted, pretty-printed JSON
+  - Added Copy button to tool input/output blocks
+  - Important tools (Write, Edit, Bash, Read, NotebookEdit) have details expanded by default
+  - Large outputs (>100 lines) start collapsed with "Show full output" button
+  - Added `data-tool-name` attribute for tool type detection
+
+- Updated `src/assets/styles.css`:
+  - Added styles for copy button with hover/active states and "copied" feedback
+  - Added large output handling with max-height, gradient fade, and show/hide button
+  - Added JSON syntax highlighting classes for keys, strings, numbers, booleans, null
+  - Improved tool details summary styling with expand/collapse arrow indicator
+
+- Updated `src/assets/keyboard.js`:
+  - Added `highlightJson()` function for JSON syntax highlighting
+  - Added `applyJsonHighlighting()` to apply highlighting on page load
+  - Added `copyToClipboard()` with visual feedback on success/failure
+  - Added `handleCopyClick()` for copy button event handling
+  - Added `handleShowFullClick()` for large output toggle
+
+- Updated `src/server/templates.rs`:
+  - Added `output_lines` field to `BlockView` for line counting
+  - Line counting handles both actual newlines and escaped `\n` sequences
+  - Added 3 new unit tests for output line counting
+
+### Test Coverage (3 new tests)
+- `test_block_view_tool_call_output_lines_json` - JSON object line counting
+- `test_block_view_tool_call_output_lines_string` - Multi-line string content
+- `test_block_view_tool_call_output_lines_escaped_string` - Escaped newline counting
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (424 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Tool inputs display as formatted, syntax-highlighted JSON (not minified)
+- [x] Long tool outputs wrap properly with horizontal scroll only when needed
+- [x] Tool <details> sections default to expanded for important tools (Write, Edit, Bash)
+- [x] Add 'Copy' button to tool input/output blocks
+- [x] Syntax highlighting for JSON in tool blocks
+- [x] Large outputs (>100 lines) stay collapsed with 'Show full output' option
+
+---
+
 ## 2026-01-30 - M2 Story 15: Open draft PR for milestone
 
 ### Summary

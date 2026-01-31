@@ -26,7 +26,7 @@
       "title": "Fix tool output rendering in web UI",
       "description": "Improve tool call rendering so inputs/outputs are readable, not compressed single-line JSON",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Tool inputs display as formatted, syntax-highlighted JSON (not minified)",
         "Long tool outputs wrap properly with horizontal scroll only when needed",

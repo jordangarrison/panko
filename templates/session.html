@@ -57,19 +57,35 @@
         </article>
 
         {% elif block.type == "tool_call" %}
-        <article class="block block-tool" data-type="tool_call" tabindex="0">
+        <article class="block block-tool" data-type="tool_call" data-tool-name="{{ block.name }}" tabindex="0">
             <div class="block-header">
                 <span class="block-label">Tool: {{ block.name }}</span>
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
             </div>
-            <details class="tool-details">
-                <summary>Input</summary>
-                <pre class="tool-input"><code>{{ block.input | tojson(indent=2) }}</code></pre>
+            {% set important_tool = block.name in ["Write", "Edit", "Bash", "Read", "NotebookEdit"] %}
+            <details class="tool-details"{% if important_tool %} open{% endif %}>
+                <summary>
+                    <span class="summary-text">Input</span>
+                    <button type="button" class="copy-btn" data-copy-target="input" title="Copy to clipboard">Copy</button>
+                </summary>
+                <div class="tool-code-wrapper">
+                    <pre class="tool-input json-code"><code>{{ block.input | tojson(indent=2) }}</code></pre>
+                </div>
             </details>
             {% if block.output %}
-            <details class="tool-details">
-                <summary>Output</summary>
-                <pre class="tool-output"><code>{{ block.output | tojson(indent=2) }}</code></pre>
+            {% set is_large_output = block.output_lines and block.output_lines > 100 %}
+            <details class="tool-details"{% if important_tool and not is_large_output %} open{% endif %}>
+                <summary>
+                    <span class="summary-text">Output{% if is_large_output %} ({{ block.output_lines }} lines){% endif %}</span>
+                    <button type="button" class="copy-btn" data-copy-target="output" title="Copy to clipboard">Copy</button>
+                </summary>
+                <div class="tool-code-wrapper{% if is_large_output %} large-output collapsed{% endif %}"{% if block.output_lines %} data-full-lines="{{ block.output_lines }}"{% endif %}>
+                    <pre class="tool-output json-code"><code>{{ block.output | tojson(indent=2) }}</code></pre>
+                    {% if is_large_output %}
+                    <div class="output-fade"></div>
+                    <button type="button" class="show-full-btn">Show full output</button>
+                    {% endif %}
+                </div>
             </details>
             {% endif %}
         </article>

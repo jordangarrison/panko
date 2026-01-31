@@ -90,6 +90,9 @@ pub struct BlockView {
     /// Tool output (for ToolCall).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
+    /// Number of lines in the output JSON (for large output detection).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_lines: Option<usize>,
     /// File path (for FileEdit).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
@@ -109,6 +112,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_lines: None,
                 path: None,
                 diff: None,
             },
@@ -119,6 +123,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_lines: None,
                 path: None,
                 diff: None,
             },
@@ -129,6 +134,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_lines: None,
                 path: None,
                 diff: None,
             },
@@ -137,16 +143,35 @@ impl BlockView {
                 input,
                 output,
                 timestamp,
-            } => Self {
-                block_type: "tool_call".to_string(),
-                timestamp: timestamp.to_rfc3339(),
-                content_html: None,
-                name: Some(name.clone()),
-                input: Some(input.clone()),
-                output: output.clone(),
-                path: None,
-                diff: None,
-            },
+            } => {
+                // Count lines in the output for large output detection.
+                // For string values, count content lines (including escaped \n).
+                // For objects/arrays, count JSON lines when pretty-printed.
+                let output_lines = output.as_ref().map(|o| {
+                    match o {
+                        serde_json::Value::String(s) => {
+                            // Count actual newlines plus escaped \n sequences
+                            let actual_newlines = s.lines().count();
+                            let escaped_newlines = s.matches("\\n").count();
+                            actual_newlines + escaped_newlines
+                        }
+                        _ => serde_json::to_string_pretty(o)
+                            .map(|s| s.lines().count())
+                            .unwrap_or(0),
+                    }
+                });
+                Self {
+                    block_type: "tool_call".to_string(),
+                    timestamp: timestamp.to_rfc3339(),
+                    content_html: None,
+                    name: Some(name.clone()),
+                    input: Some(input.clone()),
+                    output: output.clone(),
+                    output_lines,
+                    path: None,
+                    diff: None,
+                }
+            }
             Block::FileEdit {
                 path,
                 diff,
@@ -158,6 +183,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_lines: None,
                 path: Some(path.clone()),
                 diff: Some(diff.clone()),
             },
@@ -247,6 +273,72 @@ mod tests {
         assert_eq!(view.name, Some("read_file".to_string()));
         assert!(view.input.is_some());
         assert!(view.output.is_some());
+        // output_lines should be calculated
+        assert!(view.output_lines.is_some());
+    }
+
+    #[test]
+    fn test_block_view_tool_call_output_lines_json() {
+        let ts = test_timestamp();
+        // Create a multi-line JSON output
+        let output = serde_json::json!({
+            "line1": "value1",
+            "line2": "value2",
+            "line3": "value3",
+            "nested": {
+                "a": 1,
+                "b": 2
+            }
+        });
+        let block = Block::tool_call("test", serde_json::json!({}), Some(output), ts);
+        let view = BlockView::from_block(&block);
+
+        // Pretty-printed JSON should have multiple lines
+        assert!(view.output_lines.is_some());
+        let lines = view.output_lines.unwrap();
+        assert!(lines > 1, "Expected multiple lines, got {}", lines);
+    }
+
+    #[test]
+    fn test_block_view_tool_call_output_lines_string() {
+        let ts = test_timestamp();
+        // Create a multi-line string output (like file content)
+        let output = serde_json::json!(
+            "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"
+        );
+        let block = Block::tool_call("Read", serde_json::json!({}), Some(output), ts);
+        let view = BlockView::from_block(&block);
+
+        // String content lines should be counted (10 lines = 9 actual \n + 1 base)
+        assert!(view.output_lines.is_some());
+        let lines = view.output_lines.unwrap();
+        assert_eq!(lines, 10, "Expected 10 lines, got {}", lines);
+    }
+
+    #[test]
+    fn test_block_view_tool_call_output_lines_escaped_string() {
+        let ts = test_timestamp();
+        // Create a string with escaped newlines (like JSON-encoded content)
+        // This simulates: {"content": "line 1\nline 2\nline 3"}
+        let output = serde_json::json!(r#"{"content": "line 1\nline 2\nline 3"}"#);
+        let block = Block::tool_call("Read", serde_json::json!({}), Some(output), ts);
+        let view = BlockView::from_block(&block);
+
+        // Should count escaped \n sequences
+        assert!(view.output_lines.is_some());
+        let lines = view.output_lines.unwrap();
+        // 1 actual line + 2 escaped \n = 3
+        assert_eq!(lines, 3, "Expected 3 lines, got {}", lines);
+    }
+
+    #[test]
+    fn test_block_view_tool_call_no_output() {
+        let ts = test_timestamp();
+        let block = Block::tool_call("test", serde_json::json!({}), None, ts);
+        let view = BlockView::from_block(&block);
+
+        assert!(view.output.is_none());
+        assert!(view.output_lines.is_none());
     }
 
     #[test]

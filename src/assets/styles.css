@@ -159,10 +159,64 @@ body {
     font-size: 0.875rem;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    list-style: none;
+}
+
+.tool-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.tool-details summary::before {
+    content: "▶";
+    display: inline-block;
+    margin-right: 0.5rem;
+    transition: transform 0.15s ease;
+    font-size: 0.7rem;
+}
+
+.tool-details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.tool-details .summary-text {
+    flex-grow: 1;
 }
 
 .tool-details summary:hover {
     background: var(--border-color);
+}
+
+/* Copy button */
+.copy-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.copy-btn:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border-color: var(--accent-tool);
+}
+
+.copy-btn.copied {
+    background: var(--accent-assistant);
+    color: white;
+    border-color: var(--accent-assistant);
+}
+
+/* Tool code wrapper */
+.tool-code-wrapper {
+    position: relative;
 }
 
 .tool-input,
@@ -171,6 +225,91 @@ body {
     padding: 1rem;
     background: var(--code-bg);
     overflow-x: auto;
+    max-height: none;
+}
+
+/* Large output handling */
+.tool-code-wrapper.large-output.collapsed {
+    max-height: 400px;
+    overflow: hidden;
+}
+
+.tool-code-wrapper.large-output.collapsed .tool-output {
+    max-height: 350px;
+    overflow: hidden;
+}
+
+.output-fade {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    right: 0;
+    height: 80px;
+    background: linear-gradient(transparent, var(--code-bg));
+    pointer-events: none;
+}
+
+.tool-code-wrapper.expanded .output-fade {
+    display: none;
+}
+
+.show-full-btn {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 0.75rem;
+    font-size: 0.875rem;
+    font-family: var(--font-sans);
+    background: var(--bg-tertiary);
+    border: none;
+    border-top: 1px solid var(--border-color);
+    color: var(--accent-tool);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.show-full-btn:hover {
+    background: var(--border-color);
+    color: var(--text-primary);
+}
+
+.tool-code-wrapper.expanded .show-full-btn {
+    position: static;
+}
+
+.tool-code-wrapper.expanded {
+    max-height: none;
+}
+
+.tool-code-wrapper.expanded .tool-output {
+    max-height: none;
+}
+
+/* JSON syntax highlighting */
+.json-code .json-key {
+    color: #79c0ff;
+}
+
+.json-code .json-string {
+    color: #a5d6ff;
+}
+
+.json-code .json-number {
+    color: #d2a8ff;
+}
+
+.json-code .json-boolean {
+    color: #ff7b72;
+}
+
+.json-code .json-null {
+    color: #8b949e;
+    font-style: italic;
+}
+
+.json-code .json-punctuation {
+    color: var(--text-secondary);
 }
 
 /* Code and diff styling */
