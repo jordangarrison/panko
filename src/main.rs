@@ -483,6 +483,13 @@ fn process_sharing_messages(app: &mut tui::App) {
                 // Check if this is for a pending share
                 if let Some((pending_id, path, provider)) = app.take_pending_share() {
                     if pending_id == share_id {
+                        // Get session name from path for modal
+                        let session_name = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+
                         // Complete the pending share
                         app.share_manager_mut().mark_started(
                             share_id,
@@ -491,7 +498,10 @@ fn process_sharing_messages(app: &mut tui::App) {
                             provider.clone(),
                         );
                         // Update legacy sharing state for UI compatibility
-                        app.set_sharing_active(url, provider);
+                        app.set_sharing_active(url.clone(), provider.clone());
+
+                        // Show the share modal with session info
+                        app.show_share_modal(session_name, url, provider);
                     }
                 }
             }
@@ -660,6 +670,17 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
                 }
                 Err(e) => {
                     app.set_status_message(format!("✗ Download failed: {}", e));
+                }
+            }
+        }
+        tui::Action::CopyShareUrl(ref url) => {
+            // Copy the share URL to clipboard (from share modal)
+            match copy_to_clipboard(url) {
+                Ok(()) => {
+                    app.set_status_message("✓ URL copied to clipboard");
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Copy failed: {}", e));
                 }
             }
         }

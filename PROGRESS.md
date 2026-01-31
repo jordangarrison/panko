@@ -1,5 +1,96 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 8: Share started modal with URL
+
+### Summary
+Added a modal popup that displays when a share successfully starts. The modal shows the session name, public URL (styled in cyan/bold), and provider name. It auto-dismisses after 5 seconds or on any keypress, with 'c' to copy the URL to clipboard.
+
+### Changes
+- Created `src/tui/widgets/share_modal.rs`:
+  - `SHARE_MODAL_TIMEOUT` constant (5 seconds)
+  - `ShareModalState` struct with session_name, public_url, provider_name, shown_at, timeout
+  - `ShareModalState::new()` and `with_timeout()` constructor
+  - `should_dismiss()`, `remaining_time()`, `remaining_seconds()` methods for timeout handling
+  - `ShareModal` stateful widget implementing ratatui's `StatefulWidget`
+  - Widget renders centered popup with session info, URL, and keyboard hints
+  - URL truncated if too long for display area
+  - Shows countdown timer for auto-dismiss
+  - 13 unit tests for modal state and rendering
+
+- Updated `src/tui/widgets/mod.rs`:
+  - Added `mod share_modal`
+  - Exported `ShareModal`, `ShareModalState`, `SHARE_MODAL_TIMEOUT`
+
+- Updated `src/tui/app.rs`:
+  - Added `share_modal_state: Option<ShareModalState>` field to `App`
+  - Added `show_share_modal()`, `dismiss_share_modal()`, `is_share_modal_showing()` methods
+  - Added `share_modal_should_dismiss()`, `share_modal_url()` accessors
+  - Updated `handle_key_event()` to route to `handle_share_modal_key()` when modal showing
+  - Added `handle_share_modal_key()` for modal-specific key handling
+  - Added `render_share_modal()` to render modal on top of other content
+  - Updated `tick()` to auto-dismiss expired modal
+  - 10 new unit tests for modal state management and key handling
+
+- Updated `src/tui/actions.rs`:
+  - Added `CopyShareUrl(String)` action variant for copying URL from modal
+  - 1 new unit test
+
+- Updated `src/main.rs`:
+  - Updated `process_sharing_messages()` to show modal when share starts
+  - Extracts session name from path for modal display
+  - Added `CopyShareUrl` action handler to copy URL to clipboard
+
+### Test Coverage (24 new tests)
+ShareModalState tests (in share_modal.rs):
+- `test_share_modal_state_new` - construction
+- `test_share_modal_state_with_timeout` - custom timeout
+- `test_share_modal_state_should_dismiss_false_initially` - not dismissing immediately
+- `test_share_modal_state_should_dismiss_with_zero_timeout` - instant dismiss
+- `test_share_modal_state_remaining_time` - remaining time calculation
+- `test_share_modal_state_remaining_seconds` - remaining seconds accessor
+
+ShareModal widget tests (in share_modal.rs):
+- `test_share_modal_widget_new` - widget creation
+- `test_share_modal_widget_default` - default widget
+- `test_share_modal_widget_with_block` - custom block
+- `test_share_modal_widget_with_styles` - custom styles
+- `test_share_modal_render_does_not_panic` - render safety
+- `test_share_modal_render_small_area` - small terminal handling
+- `test_share_modal_render_long_url_truncated` - URL truncation
+
+App modal tests (in app.rs):
+- `test_share_modal_initially_not_showing` - default state
+- `test_show_share_modal` - showing modal
+- `test_dismiss_share_modal` - dismissing modal
+- `test_share_modal_should_dismiss_false_initially` - timeout not expired
+- `test_share_modal_key_c_triggers_copy_url` - copy URL action
+- `test_share_modal_key_enter_closes` - Enter closes
+- `test_share_modal_key_esc_closes` - Esc closes
+- `test_share_modal_any_other_key_closes` - any key closes
+- `test_tick_dismisses_expired_modal` - auto-dismiss on tick
+- `test_tick_does_not_dismiss_non_expired_modal` - no early dismiss
+
+Action tests:
+- `test_action_copy_share_url` - action variant
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (555 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Modal appears on SharingMessage::Started
+- [x] Shows: session name, public URL (bold/colored), provider
+- [x] Auto-dismisses after 5 seconds OR on keypress
+- [x] 'c' copies URL to clipboard
+- [x] Esc/Enter closes immediately
+- [x] Uses existing modal pattern
+
+---
+
 ## 2026-01-30 - M3 Story 7: Refactor sharing state for multiple shares
 
 ### Summary

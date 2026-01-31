@@ -121,7 +121,7 @@
       "title": "Share started modal with URL",
       "description": "Modal popup showing public URL when share starts",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Modal appears on SharingMessage::Started",
         "Shows: session name, public URL (bold/colored), provider",

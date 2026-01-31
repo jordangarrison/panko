@@ -5,7 +5,7 @@ use crate::tui::actions::Action;
 use crate::tui::sharing::{ShareId, ShareManager};
 use crate::tui::widgets::{
     ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
-    ProviderSelectState, SessionList, SessionListState, SortOrder,
+    ProviderSelectState, SessionList, SessionListState, ShareModal, ShareModalState, SortOrder,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -169,6 +169,8 @@ pub struct App {
     pending_share_path: Option<PathBuf>,
     /// The provider name for the pending share
     pending_share_provider: Option<String>,
+    /// State for the share started modal (shown when sharing starts)
+    share_modal_state: Option<ShareModalState>,
 }
 
 impl Default for App {
@@ -199,6 +201,7 @@ impl App {
             pending_share_id: None,
             pending_share_path: None,
             pending_share_provider: None,
+            share_modal_state: None,
         }
     }
 
@@ -223,6 +226,7 @@ impl App {
             pending_share_id: None,
             pending_share_path: None,
             pending_share_provider: None,
+            share_modal_state: None,
         }
     }
 
@@ -294,7 +298,10 @@ impl App {
 
     /// Handle a tick event.
     pub fn tick(&mut self) {
-        // Update any time-based state here
+        // Check if share modal should auto-dismiss
+        if self.share_modal_should_dismiss() {
+            self.dismiss_share_modal();
+        }
     }
 
     /// Handle terminal resize.
@@ -309,6 +316,11 @@ impl App {
         if self.show_help {
             self.show_help = false;
             return Ok(());
+        }
+
+        // Handle share modal (shown when sharing starts)
+        if self.is_share_modal_showing() {
+            return self.handle_share_modal_key(key_event);
         }
 
         // Route key events based on current state
@@ -577,6 +589,29 @@ impl App {
         Ok(())
     }
 
+    /// Handle key events when the share modal is showing.
+    fn handle_share_modal_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // Copy URL to clipboard
+            KeyCode::Char('c') => {
+                if let Some(url) = self.share_modal_url() {
+                    // Signal to copy URL - main loop handles clipboard
+                    self.pending_action = Action::CopyShareUrl(url.to_string());
+                }
+                // Keep modal open after copying
+            }
+            // Close modal immediately
+            KeyCode::Enter | KeyCode::Esc => {
+                self.dismiss_share_modal();
+            }
+            // Any other key also closes modal
+            _ => {
+                self.dismiss_share_modal();
+            }
+        }
+        Ok(())
+    }
+
     /// Handle key events when actively sharing.
     fn handle_sharing_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
         match key_event.code {
@@ -745,6 +780,45 @@ impl App {
         self.pending_share_provider = None;
     }
 
+    /// Show the share started modal.
+    pub fn show_share_modal(
+        &mut self,
+        session_name: String,
+        public_url: String,
+        provider_name: String,
+    ) {
+        self.share_modal_state = Some(ShareModalState::new(
+            session_name,
+            public_url,
+            provider_name,
+        ));
+    }
+
+    /// Dismiss the share modal.
+    pub fn dismiss_share_modal(&mut self) {
+        self.share_modal_state = None;
+    }
+
+    /// Check if the share modal is showing.
+    pub fn is_share_modal_showing(&self) -> bool {
+        self.share_modal_state.is_some()
+    }
+
+    /// Check if the share modal should auto-dismiss (timeout elapsed).
+    pub fn share_modal_should_dismiss(&self) -> bool {
+        self.share_modal_state
+            .as_ref()
+            .map(|s| s.should_dismiss())
+            .unwrap_or(false)
+    }
+
+    /// Get the public URL from the share modal (for copying).
+    pub fn share_modal_url(&self) -> Option<&str> {
+        self.share_modal_state
+            .as_ref()
+            .map(|s| s.public_url.as_str())
+    }
+
     /// Set a status message to display in the footer.
     pub fn set_status_message(&mut self, message: impl Into<String>) {
         self.status_message = Some(message.into());
@@ -845,6 +919,19 @@ impl App {
         // Render help overlay if visible
         if self.show_help {
             self.render_help_overlay(frame, area);
+        }
+
+        // Render share modal if visible (highest priority - on top of everything)
+        if self.is_share_modal_showing() {
+            self.render_share_modal(frame, area);
+        }
+    }
+
+    /// Render the share started modal.
+    fn render_share_modal(&mut self, frame: &mut Frame, area: Rect) {
+        if let Some(ref mut state) = self.share_modal_state {
+            let widget = ShareModal::new();
+            frame.render_stateful_widget(widget, area, state);
         }
     }
 
@@ -2812,5 +2899,155 @@ mod tests {
 
         assert_eq!(app.active_share_count(), 1);
         assert!(app.share_manager().has_active_shares());
+    }
+
+    // Share modal tests
+
+    #[test]
+    fn test_share_modal_initially_not_showing() {
+        let app = App::new();
+        assert!(!app.is_share_modal_showing());
+        assert!(app.share_modal_url().is_none());
+    }
+
+    #[test]
+    fn test_show_share_modal() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test_session".to_string(),
+            "https://example.trycloudflare.com".to_string(),
+            "cloudflare".to_string(),
+        );
+
+        assert!(app.is_share_modal_showing());
+        assert_eq!(
+            app.share_modal_url(),
+            Some("https://example.trycloudflare.com")
+        );
+    }
+
+    #[test]
+    fn test_dismiss_share_modal() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+        assert!(app.is_share_modal_showing());
+
+        app.dismiss_share_modal();
+        assert!(!app.is_share_modal_showing());
+        assert!(app.share_modal_url().is_none());
+    }
+
+    #[test]
+    fn test_share_modal_should_dismiss_false_initially() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Just shown, should not dismiss yet
+        assert!(!app.share_modal_should_dismiss());
+    }
+
+    #[test]
+    fn test_share_modal_key_c_triggers_copy_url() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press 'c' to copy URL
+        app.handle_key_event(key_event(KeyCode::Char('c'))).unwrap();
+
+        // Modal should still be showing (copy doesn't close)
+        assert!(app.is_share_modal_showing());
+        // Should have pending action to copy URL
+        assert!(matches!(app.pending_action(), &Action::CopyShareUrl(_)));
+    }
+
+    #[test]
+    fn test_share_modal_key_enter_closes() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press Enter to close
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_share_modal_key_esc_closes() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press Esc to close
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_share_modal_any_other_key_closes() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press any other key to close
+        app.handle_key_event(key_event(KeyCode::Char('x'))).unwrap();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_tick_dismisses_expired_modal() {
+        use std::time::Duration;
+
+        let mut app = App::new();
+        // Show modal with 0 second timeout (immediately expired)
+        app.share_modal_state = Some(
+            ShareModalState::new(
+                "test".to_string(),
+                "https://example.com".to_string(),
+                "ngrok".to_string(),
+            )
+            .with_timeout(Duration::from_secs(0)),
+        );
+
+        assert!(app.is_share_modal_showing());
+        assert!(app.share_modal_should_dismiss());
+
+        // Tick should dismiss it
+        app.tick();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_tick_does_not_dismiss_non_expired_modal() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Tick should not dismiss (modal just shown, hasn't timed out)
+        app.tick();
+        assert!(app.is_share_modal_showing());
     }
 }

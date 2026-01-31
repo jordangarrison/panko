@@ -43,6 +43,8 @@ pub enum Action {
     DeleteSession(PathBuf),
     /// Download a session file to ~/Downloads.
     DownloadSession(PathBuf),
+    /// Copy a URL to clipboard (used by share modal).
+    CopyShareUrl(String),
     /// No action to perform.
     #[default]
     None,
@@ -172,6 +174,16 @@ mod tests {
         match action {
             Action::DownloadSession(p) => assert_eq!(p, path),
             _ => panic!("Expected DownloadSession"),
+        }
+    }
+
+    #[test]
+    fn test_action_copy_share_url() {
+        let url = "https://example.trycloudflare.com".to_string();
+        let action = Action::CopyShareUrl(url.clone());
+        match action {
+            Action::CopyShareUrl(u) => assert_eq!(u, url),
+            _ => panic!("Expected CopyShareUrl"),
         }
     }
 }
