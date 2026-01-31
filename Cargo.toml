@@ -36,7 +36,7 @@ rust-embed = "8"
 inquire = "0.7"
 
 # Clipboard
-arboard = "3"
+arboard = { version = "3", features = ["wayland-data-control"] }
 
 # Error handling
 thiserror = "1"

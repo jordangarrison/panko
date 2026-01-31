@@ -670,6 +670,16 @@ impl App {
             KeyCode::Tab => {
                 self.focused_panel.toggle();
             }
+            // Toggle shares panel with Shift+S
+            KeyCode::Char('S') => {
+                self.toggle_shares_panel();
+            }
+            // Allow starting another share while sharing is active
+            KeyCode::Char('s') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::ShareSession(session.path.clone());
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -883,7 +893,9 @@ impl App {
                         }
                     }
                 }
-                SharingMessage::Error { .. } => {
+                SharingMessage::Error { message } => {
+                    tracing::error!(share_id = ?share_id, error = %message, "Share failed");
+                    self.set_status_message(format!("Share failed: {}", message));
                     shares_to_remove.push(share_id);
                     if self.pending_share_id() == Some(share_id) {
                         self.clear_sharing_state();
@@ -999,8 +1011,14 @@ impl App {
     pub fn toggle_shares_panel(&mut self) {
         self.show_shares_panel = !self.show_shares_panel;
         if self.show_shares_panel {
+            let shares = self.share_manager.shares();
+            tracing::info!(
+                share_count = shares.len(),
+                "toggle_shares_panel: Opening with {} shares",
+                shares.len()
+            );
             // Update the shares panel state with current shares
-            self.shares_panel_state.update(self.share_manager.shares());
+            self.shares_panel_state.update(shares);
         }
     }
 

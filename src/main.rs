@@ -523,6 +523,7 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
             if providers.len() == 1 {
                 // Only one provider - start sharing immediately
                 let provider = &providers[0];
+                tracing::info!(path = ?path, provider = %provider.name, "Starting share");
                 let share_id = tui::ShareId::new();
                 let handle = tui::SharingHandle::start(path.clone(), provider.name.clone());
 
@@ -544,6 +545,7 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
         }
         tui::Action::StartSharing { path, provider } => {
             // Start sharing with the selected provider
+            tracing::info!(path = ?path, provider = %provider, "Starting share");
             let share_id = tui::ShareId::new();
             let handle = tui::SharingHandle::start(path.clone(), provider.clone());
 

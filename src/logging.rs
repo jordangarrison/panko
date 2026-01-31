@@ -150,9 +150,22 @@ pub fn init_logging(config: &LogConfig) -> LogGuard {
 ///
 /// In TUI mode, we only want to log to a file (if configured) since stderr
 /// is used by the TUI. This function sets up file-only logging.
+///
+/// If `RUST_LOG` is set but no log file is configured, logs are written to
+/// `/tmp/panko-tui.log` to enable debugging without disrupting the TUI.
 pub fn init_tui_logging(log_file: Option<&str>) -> LogGuard {
-    let (file_layer, file_guard) = if let Some(log_file_path) = log_file {
-        let path = Path::new(log_file_path);
+    // Check if RUST_LOG is set - if so, we should enable file logging even without explicit config
+    let rust_log_set = std::env::var("RUST_LOG").is_ok();
+
+    // Determine the log file path: explicit config takes precedence, then RUST_LOG triggers default
+    let effective_log_file = match log_file {
+        Some(path) => Some(path.to_string()),
+        None if rust_log_set => Some("/tmp/panko-tui.log".to_string()),
+        None => None,
+    };
+
+    let (file_layer, file_guard) = if let Some(log_file_path) = effective_log_file {
+        let path = Path::new(&log_file_path);
         let parent_dir = path.parent().unwrap_or(Path::new("."));
         let filename = path
             .file_name()
@@ -162,13 +175,18 @@ pub fn init_tui_logging(log_file: Option<&str>) -> LogGuard {
         let file_appender = tracing_appender::rolling::never(parent_dir, filename);
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
+        // Build EnvFilter respecting RUST_LOG, with DEBUG as default
+        let env_filter = EnvFilter::builder()
+            .with_default_directive(LevelFilter::DEBUG.into())
+            .from_env_lossy();
+
         let file_layer = fmt::layer()
             .with_ansi(false)
             .with_target(true)
             .with_thread_ids(true)
             .with_timer(fmt::time::uptime())
             .with_writer(non_blocking)
-            .with_filter(LevelFilter::DEBUG);
+            .with_filter(env_filter);
 
         (Some(file_layer), Some(guard))
     } else {

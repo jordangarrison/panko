@@ -178,8 +178,17 @@ impl ShareManager {
         public_url: String,
         provider_name: String,
     ) {
+        info!(
+            id = ?id,
+            url = %public_url,
+            "mark_started: Adding share to active_shares"
+        );
         let share = ActiveShare::new(id, session_path, public_url, provider_name);
         self.active_shares.push(share);
+        info!(
+            active_count = self.active_shares.len(),
+            "mark_started: active_shares count after push"
+        );
     }
 
     /// Stop a share by ID.
