@@ -14,9 +14,13 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 /// Default maximum number of concurrent shares.
 pub const DEFAULT_MAX_SHARES: usize = 5;
+
+/// Default auto-clear timeout for status messages.
+pub const STATUS_MESSAGE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -154,8 +158,8 @@ pub struct App {
     sharing_state: SharingState,
     /// Provider selection state (when showing provider popup)
     provider_select_state: ProviderSelectState,
-    /// Status message to display in the footer (briefly)
-    status_message: Option<String>,
+    /// Status message to display in the footer (with timestamp for auto-clear)
+    status_message: Option<(String, Instant)>,
     /// Whether the help overlay is visible
     show_help: bool,
     /// Current refresh state
@@ -320,6 +324,11 @@ impl App {
         // Check if share modal should auto-dismiss
         if self.share_modal_should_dismiss() {
             self.dismiss_share_modal();
+        }
+
+        // Check if status message should auto-clear
+        if self.status_message_should_clear() {
+            self.clear_status_message();
         }
     }
 
@@ -865,8 +874,9 @@ impl App {
     }
 
     /// Set a status message to display in the footer.
+    /// The message will auto-clear after `STATUS_MESSAGE_TIMEOUT`.
     pub fn set_status_message(&mut self, message: impl Into<String>) {
-        self.status_message = Some(message.into());
+        self.status_message = Some((message.into(), Instant::now()));
     }
 
     /// Clear the status message.
@@ -876,7 +886,15 @@ impl App {
 
     /// Get the current status message.
     pub fn status_message(&self) -> Option<&str> {
-        self.status_message.as_deref()
+        self.status_message.as_ref().map(|(msg, _)| msg.as_str())
+    }
+
+    /// Check if the status message should auto-clear (timeout elapsed).
+    pub fn status_message_should_clear(&self) -> bool {
+        self.status_message
+            .as_ref()
+            .map(|(_, shown_at)| shown_at.elapsed() >= STATUS_MESSAGE_TIMEOUT)
+            .unwrap_or(false)
     }
 
     /// Check if a confirmation dialog is showing.
@@ -1349,7 +1367,7 @@ impl App {
     /// Render the footer with keyboard hints.
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         // Show status message if present (takes priority)
-        let content = if let Some(ref msg) = self.status_message {
+        let content = if let Some((ref msg, _)) = self.status_message {
             Line::from(vec![Span::styled(
                 msg.clone(),
                 Style::default()
@@ -2201,6 +2219,56 @@ mod tests {
 
         app.clear_status_message();
         assert!(app.status_message().is_none());
+    }
+
+    #[test]
+    fn test_status_message_should_clear_false_initially() {
+        let mut app = App::new();
+        app.set_status_message("Test message");
+
+        // Just set, should not clear yet
+        assert!(!app.status_message_should_clear());
+    }
+
+    #[test]
+    fn test_status_message_should_clear_when_none() {
+        let app = App::new();
+
+        // No message, should return false (nothing to clear)
+        assert!(!app.status_message_should_clear());
+    }
+
+    #[test]
+    fn test_tick_clears_expired_status_message() {
+        use std::time::Duration;
+
+        let mut app = App::new();
+        // Manually create an already-expired status message
+        app.status_message = Some((
+            "Expired message".to_string(),
+            std::time::Instant::now() - Duration::from_secs(5),
+        ));
+
+        assert!(app.status_message().is_some());
+        assert!(app.status_message_should_clear());
+
+        // Tick should clear it
+        app.tick();
+        assert!(app.status_message().is_none());
+    }
+
+    #[test]
+    fn test_tick_does_not_clear_fresh_status_message() {
+        let mut app = App::new();
+        app.set_status_message("Fresh message");
+
+        assert!(app.status_message().is_some());
+        assert!(!app.status_message_should_clear());
+
+        // Tick should not clear it
+        app.tick();
+        assert!(app.status_message().is_some());
+        assert_eq!(app.status_message(), Some("Fresh message"));
     }
 
     #[test]
