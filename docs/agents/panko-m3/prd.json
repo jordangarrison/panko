@@ -197,7 +197,7 @@
       "title": "Create MockTunnelProvider and E2E testing for multi-share",
       "description": "Implement MockTunnelProvider that returns predictable URLs without subprocesses. Add E2E tests validating full sharing flow including concurrent shares, unique IDs, limit enforcement, and graceful shutdown.",
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create MockTunnelProvider implementing TunnelProvider trait (returns configurable URLs instantly)",
         "MockTunnelProvider can simulate startup delay and errors for testing",

@@ -12,9 +12,15 @@ mod cloudflare;
 mod ngrok;
 mod tailscale;
 
+/// Mock tunnel provider for testing. This module is public to allow integration tests
+/// to use MockTunnelProvider for E2E testing of the sharing flow.
+pub mod mock;
+
 pub use cloudflare::CloudflareTunnel;
 pub use ngrok::NgrokTunnel;
 pub use tailscale::TailscaleTunnel;
+
+pub use mock::{MockConfig, MockTunnelProvider};
 
 /// Error types for tunnel operations
 #[derive(Debug, Error)]
@@ -58,6 +64,17 @@ impl TunnelHandle {
     pub fn new(process: Child, url: String, provider_name: &str) -> Self {
         Self {
             process: Some(process),
+            url,
+            provider_name: provider_name.to_string(),
+        }
+    }
+
+    /// Create a tunnel handle without a subprocess.
+    ///
+    /// This is used for testing with mock providers where no actual subprocess is spawned.
+    pub fn without_process(url: String, provider_name: &str) -> Self {
+        Self {
+            process: None,
             url,
             provider_name: provider_name.to_string(),
         }
@@ -166,7 +183,7 @@ pub fn get_provider(name: &str) -> Option<Box<dyn TunnelProvider>> {
 /// Get a tunnel provider by name with optional configuration
 ///
 /// # Arguments
-/// * `name` - Provider name (cloudflare, ngrok, tailscale)
+/// * `name` - Provider name (cloudflare, ngrok, tailscale, or mock for testing)
 /// * `ngrok_token` - Optional auth token for ngrok
 pub fn get_provider_with_config(
     name: &str,
@@ -182,6 +199,7 @@ pub fn get_provider_with_config(
             }
         }
         "tailscale" => Some(Box::new(TailscaleTunnel::new())),
+        "mock" => Some(Box::new(MockTunnelProvider::new())),
         _ => None,
     }
 }

@@ -22,7 +22,7 @@
 | 10 | Concurrent share management | ✅ Complete | Depends on Stories 7, 8, 9 |
 | 11 | Open draft PR for M3 | ✅ Complete | Depends on Stories 1-10 |
 | 12 | Add structured logging and diagnostics for sharing | ✅ Complete | |
-| 13 | Create MockTunnelProvider and E2E testing for multi-share | ⬜ Not Started | |
+| 13 | Create MockTunnelProvider and E2E testing for multi-share | ✅ Complete | |
 
 ## Legend
 
@@ -85,6 +85,44 @@ Added tracing-based logging infrastructure for sharing operations with configura
 - ✅ `cargo clippy` - no warnings
 - ✅ `cargo fmt --check` - properly formatted
 - ✅ CLI shows verbose flag in `--help` for all subcommands
+
+---
+
+### 2026-01-30 - Story 13: MockTunnelProvider and E2E Testing
+
+Implemented MockTunnelProvider for testing and added comprehensive E2E tests for multi-share functionality.
+
+**Files added/updated:**
+- `src/tunnel/mock.rs` - New MockTunnelProvider with configurable URLs, delays, and error simulation
+- `src/tunnel/mod.rs` - Added mock module export and TunnelHandle::without_process method
+- `tests/sharing_e2e.rs` - 19 E2E tests for sharing functionality
+
+**Features implemented:**
+- MockTunnelProvider implementing TunnelProvider trait
+- Configurable URL generation with `{n}` placeholder for unique URLs
+- Simulated startup delay support for testing timeout scenarios
+- MockError enum for simulating different error types (NotAvailable, UrlParseFailed, Timeout)
+- TunnelHandle::without_process for creating handles without subprocesses
+
+**Tests added:**
+- MockTunnelProvider basic spawn and URL generation tests
+- Unique URL verification across multiple spawns
+- Custom URL template support
+- Simulated delay and error behavior
+- ShareManager multi-share tests:
+  - Start 3 concurrent shares with unique ShareIds
+  - Verify max_shares limit enforcement (capacity check, rejection at limit)
+  - Graceful shutdown of all active shares
+  - Individual share stop/removal
+  - Duration tracking
+  - Session name extraction
+- Integration tests combining MockTunnelProvider with ShareManager
+
+**Validation results:**
+- ✅ `cargo build` - passes
+- ✅ `cargo test` - all 608 tests pass (including 19 new E2E tests, 12 new mock unit tests)
+- ✅ `cargo clippy` - no warnings
+- ✅ `cargo fmt --check` - properly formatted
 
 ---
 
