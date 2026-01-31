@@ -4,7 +4,7 @@
 
 **Target Version**: v0.4.0 (multi-share & context export)
 **Prerequisites**: Milestone 1 (v0.1.0-v0.2.0) and Milestone 2 (v0.3.0) complete
-**Status**: In Progress
+**Status**: Ready for Review (PR #3)
 
 ## Story Progress
 
@@ -123,6 +123,45 @@ Implemented MockTunnelProvider for testing and added comprehensive E2E tests for
 - ✅ `cargo test` - all 608 tests pass (including 19 new E2E tests, 12 new mock unit tests)
 - ✅ `cargo clippy` - no warnings
 - ✅ `cargo fmt --check` - properly formatted
+
+---
+
+### 2026-01-30 - Bug Fix: TUI Screen Flickering During Share Polling
+
+Fixed severe screen flickering that occurred when shares were active. The previous implementation returned `RunResult::Tick` from `run_with_watcher()` every 250ms, causing the main loop to exit and re-enter the alternate screen rapidly (4x/second).
+
+**Root cause:**
+- `RunResult::Tick` returned to process share messages externally
+- Main loop called `tui::restore()` (exits alternate screen)
+- Main loop called `tui::init()` (re-enters alternate screen)
+- This cycling caused visible flickering
+
+**Solution:**
+Process share messages inline within the TUI event loop instead of returning to the main loop.
+
+**Files updated:**
+- `src/tui/mod.rs` - Removed `RunResult::Tick` variant, process messages inline during tick
+- `src/tui/app.rs` - Added `process_share_messages()` method, added `SharingMessage` import
+- `src/main.rs` - Removed `process_sharing_messages()` function and `Tick` handling
+- `src/tui/sharing.rs` - Fixed to use `start_server_with_source` for proper source tracking
+- `src/assets/keyboard.js` - Added 'c' keybind for copy-all in web session viewer
+- `src/assets/styles.css` - Styling for copy-all button
+- `templates/session.html` - Copy-all button in web UI
+
+**Validation results:**
+- ✅ `cargo build` - passes
+- ✅ `cargo test` - all 589 tests pass
+- ✅ `cargo clippy` - no warnings
+- ✅ `cargo fmt --check` - properly formatted
+- ✅ Manual test: No screen flickering when shares are active
+
+---
+
+### 2026-01-30 - PR Ready for Review
+
+Marked PR #3 as ready for review after completing all stories and bug fixes.
+
+**PR URL:** https://github.com/jordangarrison/panko/pull/3
 
 ---
 
