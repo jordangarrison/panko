@@ -5,8 +5,12 @@ use inquire::Select;
 use std::path::{Path, PathBuf};
 
 use panko::config::{format_config, Config};
+use panko::export::{format_context, ContextOptions};
+use panko::logging::{init_logging, init_tui_logging, LogConfig, Verbosity};
 use panko::parser::{ClaudeParser, SessionParser};
-use panko::server::{run_server, shutdown_signal, start_server, ServerConfig};
+use panko::server::{
+    run_server_with_source, shutdown_signal, start_server_with_source, ServerConfig,
+};
 use panko::tui;
 use panko::tunnel::{detect_available_providers, get_provider_with_config, AvailableProvider};
 
@@ -18,6 +22,10 @@ use panko::tunnel::{detect_available_providers, get_provider_with_config, Availa
     long_about = "A CLI tool for viewing and sharing AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing.\n\nRun without arguments to enter interactive TUI mode."
 )]
 struct Cli {
+    /// Enable verbose logging (can be repeated: -v for debug, -vv for trace)
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -180,13 +188,33 @@ fn prompt_tunnel_selection(providers: &[AvailableProvider]) -> Result<AvailableP
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Load configuration for log file path
+    let app_config = Config::load().unwrap_or_default();
+
+    // Determine verbosity level from CLI
+    let verbosity = match cli.verbose {
+        0 => Verbosity::Quiet,
+        1 => Verbosity::Normal,
+        2 => Verbosity::Verbose,
+        _ => Verbosity::Trace,
+    };
+
     // If no subcommand is provided, enter TUI mode
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
+            // For TUI mode, only log to file (if configured) since stderr is used by the TUI
+            let _log_guard = init_tui_logging(app_config.log_file.as_deref());
             return run_tui();
         }
     };
+
+    // Initialize logging for CLI commands
+    let log_config = LogConfig {
+        verbosity,
+        log_file: app_config.log_file.clone(),
+    };
+    let _log_guard = init_logging(&log_config);
 
     match command {
         Commands::View {
@@ -194,9 +222,6 @@ async fn main() -> Result<()> {
             port,
             no_browser,
         } => {
-            // Load configuration
-            let app_config = Config::load().unwrap_or_default();
-
             // Check file exists
             if !file.exists() {
                 anyhow::bail!("File not found: {}", file.display());
@@ -221,12 +246,9 @@ async fn main() -> Result<()> {
                 open_browser: !no_browser,
             };
 
-            run_server(session, server_config).await?;
+            run_server_with_source(session, server_config, Some(file)).await?;
         }
         Commands::Share { file, tunnel, port } => {
-            // Load configuration
-            let app_config = Config::load().unwrap_or_default();
-
             // Check file exists
             if !file.exists() {
                 anyhow::bail!("File not found: {}", file.display());
@@ -325,7 +347,8 @@ async fn main() -> Result<()> {
                 open_browser: false,
             };
 
-            let server_handle = start_server(session, server_config).await?;
+            let server_handle =
+                start_server_with_source(session, server_config, Some(file.clone())).await?;
             let actual_port = server_handle.port();
 
             println!("Local server running at: {}", server_handle.local_url());
@@ -408,11 +431,11 @@ fn run_tui() -> Result<()> {
         }
     }
 
+    // Apply max_shares from config (default is 5)
+    app.set_max_shares(config.effective_max_shares(tui::DEFAULT_MAX_SHARES));
+
     // Track initial sort order to detect changes
     let initial_sort_order = app.sort_order();
-
-    // Track the active sharing handle (if any)
-    let mut sharing_handle: Option<tui::SharingHandle> = None;
 
     // Main loop that handles TUI and actions
     loop {
@@ -428,10 +451,8 @@ fn run_tui() -> Result<()> {
         // Handle the result
         match result {
             Ok(tui::RunResult::Done) => {
-                // User quit - stop any active sharing first
-                if let Some(handle) = sharing_handle.take() {
-                    handle.stop();
-                }
+                // User quit - stop all active shares first
+                app.stop_all_shares();
 
                 // Save sort order if changed
                 let final_sort_order = app.sort_order();
@@ -450,45 +471,14 @@ fn run_tui() -> Result<()> {
             }
             Ok(tui::RunResult::Action(action)) => {
                 // Handle the action
-                handle_tui_action(&action, &mut app, &mut sharing_handle)?;
+                handle_tui_action(&action, &mut app)?;
                 // Continue the TUI loop after action completes
             }
             Err(e) => {
-                // Stop sharing on error
-                if let Some(handle) = sharing_handle.take() {
-                    handle.stop();
-                }
+                // Stop all shares on error
+                app.stop_all_shares();
                 return Err(anyhow::anyhow!("Application error: {}", e));
             }
-        }
-
-        // Check for sharing messages
-        let mut should_clear_handle = false;
-        if let Some(ref handle) = sharing_handle {
-            while let Some(msg) = handle.try_recv() {
-                match msg {
-                    tui::SharingMessage::Started { url } => {
-                        // Copy URL to clipboard
-                        if let Ok(mut clipboard) = Clipboard::new() {
-                            let _ = clipboard.set_text(&url);
-                        }
-                        // Update app state
-                        app.set_sharing_active(url, "tunnel".to_string());
-                    }
-                    tui::SharingMessage::Error { message } => {
-                        eprintln!("Sharing error: {}", message);
-                        app.clear_sharing_state();
-                        should_clear_handle = true;
-                    }
-                    tui::SharingMessage::Stopped => {
-                        app.clear_sharing_state();
-                        should_clear_handle = true;
-                    }
-                }
-            }
-        }
-        if should_clear_handle {
-            sharing_handle = None;
         }
     }
 
@@ -496,22 +486,24 @@ fn run_tui() -> Result<()> {
 }
 
 /// Handle an action triggered from the TUI.
-fn handle_tui_action(
-    action: &tui::Action,
-    app: &mut tui::App,
-    sharing_handle: &mut Option<tui::SharingHandle>,
-) -> Result<()> {
+fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
     match action {
         tui::Action::ViewSession(path) => {
-            // Stop any active sharing before viewing
-            if let Some(handle) = sharing_handle.take() {
-                handle.stop();
-                app.clear_sharing_state();
-            }
+            // Note: We don't stop shares when viewing, user can view while sharing
             // View the session using the existing server code
             handle_view_from_tui(path)?;
         }
         tui::Action::ShareSession(path) => {
+            // Check if we can add another share
+            if !app.can_add_share() {
+                eprintln!(
+                    "Maximum number of concurrent shares reached ({}). Stop a share first.",
+                    app.active_share_count()
+                );
+                wait_for_key("Press Enter to continue...");
+                return Ok(());
+            }
+
             // Detect available providers
             let available = detect_available_providers();
             if available.is_empty() {
@@ -531,10 +523,19 @@ fn handle_tui_action(
             if providers.len() == 1 {
                 // Only one provider - start sharing immediately
                 let provider = &providers[0];
-                *sharing_handle = Some(tui::SharingHandle::start(
+                let share_id = tui::ShareId::new();
+                let handle = tui::SharingHandle::start(path.clone(), provider.name.clone());
+
+                // Track pending share (waiting for Started message)
+                app.set_pending_share(share_id, path.clone(), provider.name.clone());
+                app.share_manager_mut().add_pending_share(
+                    share_id,
                     path.clone(),
                     provider.name.clone(),
-                ));
+                    handle,
+                );
+
+                // Set UI state to Starting
                 app.set_sharing_active("Starting...".to_string(), provider.name.clone());
             } else {
                 // Multiple providers - show selection popup
@@ -543,14 +544,21 @@ fn handle_tui_action(
         }
         tui::Action::StartSharing { path, provider } => {
             // Start sharing with the selected provider
-            *sharing_handle = Some(tui::SharingHandle::start(path.clone(), provider.clone()));
+            let share_id = tui::ShareId::new();
+            let handle = tui::SharingHandle::start(path.clone(), provider.clone());
+
+            // Track pending share
+            app.set_pending_share(share_id, path.clone(), provider.clone());
+            app.share_manager_mut().add_pending_share(
+                share_id,
+                path.clone(),
+                provider.clone(),
+                handle,
+            );
         }
         tui::Action::StopSharing => {
-            // Stop the current sharing session
-            if let Some(handle) = sharing_handle.take() {
-                handle.stop();
-            }
-            app.clear_sharing_state();
+            // Stop all active shares (legacy behavior for single Esc press)
+            app.stop_all_shares();
         }
         tui::Action::SharingStarted { url, provider } => {
             // This is handled via the message channel now
@@ -562,6 +570,20 @@ fn handle_tui_action(
             match copy_to_clipboard(&path_str) {
                 Ok(()) => {
                     app.set_status_message(format!("✓ Copied: {}", path_str));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Copy failed: {}", e));
+                }
+            }
+        }
+        tui::Action::CopyContext(path) => {
+            // Copy session context to clipboard
+            match handle_copy_context(path) {
+                Ok((message_count, estimated_tokens)) => {
+                    app.set_status_message(format!(
+                        "✓ Context copied ({} messages, ~{} tokens)",
+                        message_count, estimated_tokens
+                    ));
                 }
                 Err(e) => {
                     app.set_status_message(format!("✗ Copy failed: {}", e));
@@ -595,6 +617,41 @@ fn handle_tui_action(
                     app.set_status_message(format!("✗ Delete failed: {}", e));
                 }
             }
+        }
+        tui::Action::DownloadSession(path) => {
+            // Download the session file to ~/Downloads
+            match handle_download_session(path) {
+                Ok(dest_path) => {
+                    app.set_status_message(format!("✓ Saved to {}", dest_path.display()));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Download failed: {}", e));
+                }
+            }
+        }
+        tui::Action::CopyShareUrl(ref url) => {
+            // Copy the share URL to clipboard (from share modal)
+            match copy_to_clipboard(url) {
+                Ok(()) => {
+                    app.set_status_message("✓ URL copied to clipboard");
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Copy failed: {}", e));
+                }
+            }
+        }
+        tui::Action::StopShareById(id) => {
+            // Stop a specific share by its ID
+            app.stop_share(*id);
+            // Update the shares panel state
+            if app.is_shares_panel_showing() {
+                let shares = app.share_manager().shares();
+                if shares.is_empty() {
+                    // Close panel if no more shares
+                    app.toggle_shares_panel();
+                }
+            }
+            app.set_status_message("✓ Share stopped");
         }
         tui::Action::None => {
             // Nothing to do
@@ -644,9 +701,11 @@ fn handle_view_from_tui(path: &Path) -> Result<()> {
 
     // Run the server using the current runtime (we're already inside #[tokio::main])
     // Use block_in_place to run async code from synchronous context within runtime
+    let source_path = path.to_path_buf();
     tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current().block_on(async {
-            if let Err(e) = run_server(session, server_config).await {
+            if let Err(e) = run_server_with_source(session, server_config, Some(source_path)).await
+            {
                 eprintln!("Server error: {}", e);
             }
         })
@@ -666,6 +725,47 @@ fn wait_for_key(message: &str) {
 
     let stdin = io::stdin();
     let _ = stdin.lock().lines().next();
+}
+
+/// Handle copying session context to clipboard.
+///
+/// Parses the session, formats it as markdown context, and copies to clipboard.
+/// Returns the message count and estimated token count on success.
+fn handle_copy_context(path: &Path) -> Result<(usize, usize)> {
+    // Parse the session
+    let session = parse_session(path)?;
+
+    // Format as context
+    let options = ContextOptions::for_clipboard();
+    let context = format_context(&session, &options);
+
+    // Copy to clipboard
+    copy_to_clipboard(&context.content)?;
+
+    Ok((context.message_count, context.estimated_tokens))
+}
+
+/// Handle downloading a session file to ~/Downloads.
+///
+/// Copies the session JSONL file to the user's Downloads directory
+/// with the filename format: {session_id}.jsonl
+fn handle_download_session(path: &Path) -> Result<PathBuf> {
+    // Get the Downloads directory
+    let downloads_dir = dirs::download_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find Downloads directory"))?;
+
+    // Get the filename from the source path
+    let filename = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid source path"))?;
+
+    // Create the destination path
+    let dest_path = downloads_dir.join(filename);
+
+    // Copy the file
+    std::fs::copy(path, &dest_path).context("Failed to copy session file")?;
+
+    Ok(dest_path)
 }
 
 /// Handle config subcommand
@@ -738,9 +838,33 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                         println!("Set default_sort = \"{}\"", value);
                     }
                 }
+                "max_shares" => {
+                    if value.is_empty() {
+                        config.set_max_shares(None);
+                        println!("Unset max_shares");
+                    } else {
+                        let max: usize = value
+                            .parse()
+                            .context("Invalid max_shares value. Must be a positive integer")?;
+                        if max == 0 {
+                            anyhow::bail!("max_shares must be at least 1");
+                        }
+                        config.set_max_shares(Some(max));
+                        println!("Set max_shares = {}", max);
+                    }
+                }
+                "log_file" => {
+                    if value.is_empty() {
+                        config.set_log_file(None);
+                        println!("Unset log_file");
+                    } else {
+                        config.set_log_file(Some(value.clone()));
+                        println!("Set log_file = \"{}\"", value);
+                    }
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares, log_file",
                         key
                     );
                 }
@@ -768,9 +892,17 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                     config.set_default_sort(None);
                     println!("Unset default_sort");
                 }
+                "max_shares" => {
+                    config.set_max_shares(None);
+                    println!("Unset max_shares");
+                }
+                "log_file" => {
+                    config.set_log_file(None);
+                    println!("Unset log_file");
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares, log_file",
                         key
                     );
                 }

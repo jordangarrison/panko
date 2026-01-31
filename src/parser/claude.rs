@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{Block, ParseError, Session, SessionParser};
+use super::{Block, ParseError, Session, SessionParser, SubAgentMeta, SubAgentStatus};
 
 /// Parser for Claude Code JSONL session files.
 #[derive(Debug, Default)]
@@ -53,6 +53,10 @@ impl SessionParser for ClaudeParser {
 
         // Track pending tool calls that haven't received results yet
         let mut pending_tool_calls: HashMap<String, PendingToolCall> = HashMap::new();
+
+        // Track sub-agents spawned via the Task tool
+        let mut sub_agents: Vec<SubAgentMeta> = Vec::new();
+        let mut pending_sub_agents: HashMap<String, usize> = HashMap::new(); // tool_id -> index in sub_agents
 
         for (line_num, line_result) in reader.lines().enumerate() {
             let line = line_result.map_err(|e| ParseError::io_error(path, e))?;
@@ -100,6 +104,42 @@ impl SessionParser for ClaudeParser {
                             // Tool results come as array of content blocks
                             for block in blocks_arr {
                                 if let Some(tool_use_id) = &block.tool_use_id {
+                                    // Check if this is a sub-agent completion
+                                    if let Some(&agent_idx) = pending_sub_agents.get(tool_use_id) {
+                                        // Complete the sub-agent
+                                        if let Some(agent) = sub_agents.get_mut(agent_idx) {
+                                            let result = block
+                                                .content
+                                                .as_ref()
+                                                .map(|c| c.to_string())
+                                                .unwrap_or_default();
+                                            let completed_at =
+                                                entry.timestamp.unwrap_or_else(Utc::now);
+
+                                            // Check if result indicates an error
+                                            if block.is_error.unwrap_or(false) {
+                                                agent.fail(result, completed_at);
+                                            } else {
+                                                agent.complete(result, completed_at);
+                                            }
+
+                                            // Update the corresponding SubAgentSpawn block status
+                                            for blk in blocks.iter_mut() {
+                                                if let Block::SubAgentSpawn {
+                                                    agent_id,
+                                                    status,
+                                                    ..
+                                                } = blk
+                                                {
+                                                    if agent_id == tool_use_id {
+                                                        *status = agent.status;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        pending_sub_agents.remove(tool_use_id);
+                                    }
+
                                     // This is a tool result
                                     if let Some(pending) = pending_tool_calls.remove(tool_use_id) {
                                         let output = block
@@ -139,6 +179,8 @@ impl SessionParser for ClaudeParser {
                                 ts,
                                 &mut blocks,
                                 &mut pending_tool_calls,
+                                &mut sub_agents,
+                                &mut pending_sub_agents,
                             );
                         }
                     }
@@ -176,6 +218,7 @@ impl SessionParser for ClaudeParser {
             session = session.with_project(proj);
         }
         session.blocks = blocks;
+        session.sub_agents = sub_agents;
 
         Ok(session)
     }
@@ -229,6 +272,8 @@ struct ContentBlock {
     id: Option<String>,
     tool_use_id: Option<String>,
     content: Option<ToolResultContent>,
+    /// Whether this tool result indicates an error.
+    is_error: Option<bool>,
 }
 
 /// Tool result content can be a string or an array of content blocks.
@@ -298,6 +343,8 @@ fn process_assistant_message(
     timestamp: DateTime<Utc>,
     blocks: &mut Vec<Block>,
     pending_tool_calls: &mut HashMap<String, PendingToolCall>,
+    sub_agents: &mut Vec<SubAgentMeta>,
+    pending_sub_agents: &mut HashMap<String, usize>,
 ) {
     if let Some(MessageContent::Array(content_blocks)) = &message.content {
         for block in content_blocks {
@@ -320,8 +367,33 @@ fn process_assistant_message(
                     if let (Some(name), Some(id)) = (&block.name, &block.id) {
                         let input = block.input.clone().unwrap_or(Value::Null);
 
+                        // Check if this is a Task tool call (sub-agent spawn)
+                        if name == "Task" {
+                            if let Some(sub_agent_spawn) =
+                                extract_sub_agent_spawn(id, &input, timestamp)
+                            {
+                                // Create SubAgentMeta and track it
+                                let agent_meta = SubAgentMeta::new(
+                                    id.clone(),
+                                    input
+                                        .get("subagent_type")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown"),
+                                    input
+                                        .get("description")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or(""),
+                                    input.get("prompt").and_then(|v| v.as_str()).unwrap_or(""),
+                                    timestamp,
+                                );
+                                let agent_idx = sub_agents.len();
+                                sub_agents.push(agent_meta);
+                                pending_sub_agents.insert(id.clone(), agent_idx);
+                                blocks.push(sub_agent_spawn);
+                            }
+                        }
                         // Check if this is a file edit tool
-                        if is_file_edit_tool(name) {
+                        else if is_file_edit_tool(name) {
                             if let Some(file_edit) = extract_file_edit(name, &input, timestamp) {
                                 blocks.push(file_edit);
                             }
@@ -342,6 +414,29 @@ fn process_assistant_message(
             }
         }
     }
+}
+
+/// Extract a SubAgentSpawn block from a Task tool call.
+fn extract_sub_agent_spawn(
+    tool_id: &str,
+    input: &Value,
+    timestamp: DateTime<Utc>,
+) -> Option<Block> {
+    let agent_type = input.get("subagent_type").and_then(|v| v.as_str())?;
+    let description = input
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let prompt = input.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+
+    Some(Block::sub_agent_spawn(
+        tool_id,
+        agent_type,
+        description,
+        prompt,
+        SubAgentStatus::Running,
+        timestamp,
+    ))
 }
 
 /// Check if a tool name corresponds to a file edit operation.
@@ -733,5 +828,227 @@ mod tests {
             },
         ]);
         assert_eq!(array_with_none.to_string(), "only this");
+    }
+
+    #[test]
+    fn test_parse_task_tool_creates_sub_agent_spawn_block() {
+        let content = r#"{"type":"user","sessionId":"test-123","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Explore the codebase"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Let me explore."},{"type":"tool_use","id":"task-1","name":"Task","input":{"subagent_type":"Explore","description":"Explore codebase","prompt":"Search for main entry points"}}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        // Should have: user prompt, assistant response, sub-agent spawn, and tool call
+        assert_eq!(session.blocks.len(), 4);
+
+        // Verify SubAgentSpawn block
+        let mut found_sub_agent = false;
+        for block in &session.blocks {
+            if let Block::SubAgentSpawn {
+                agent_id,
+                agent_type,
+                description,
+                prompt,
+                status,
+                ..
+            } = block
+            {
+                assert_eq!(agent_id, "task-1");
+                assert_eq!(agent_type, "Explore");
+                assert_eq!(description, "Explore codebase");
+                assert_eq!(prompt, "Search for main entry points");
+                assert_eq!(*status, SubAgentStatus::Running);
+                found_sub_agent = true;
+            }
+        }
+        assert!(found_sub_agent, "Expected SubAgentSpawn block");
+
+        // Verify SubAgentMeta in session
+        assert_eq!(session.sub_agents.len(), 1);
+        assert_eq!(session.sub_agents[0].id, "task-1");
+        assert_eq!(session.sub_agents[0].agent_type, "Explore");
+        assert_eq!(session.sub_agents[0].status, SubAgentStatus::Running);
+    }
+
+    #[test]
+    fn test_parse_task_tool_with_result_completes_sub_agent() {
+        let content = r#"{"type":"user","sessionId":"test-123","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Explore"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"task-1","name":"Task","input":{"subagent_type":"Explore","description":"Explore","prompt":"Find files"}}]}}
+{"type":"user","timestamp":"2024-01-15T10:30:10Z","message":{"role":"user","content":[{"tool_use_id":"task-1","type":"tool_result","content":"Found: main.rs, lib.rs"}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        // Verify SubAgentMeta is completed
+        assert_eq!(session.sub_agents.len(), 1);
+        assert_eq!(session.sub_agents[0].status, SubAgentStatus::Completed);
+        assert_eq!(
+            session.sub_agents[0].result.as_ref().unwrap(),
+            "Found: main.rs, lib.rs"
+        );
+        assert!(session.sub_agents[0].completed_at.is_some());
+
+        // Verify SubAgentSpawn block status is updated
+        for block in &session.blocks {
+            if let Block::SubAgentSpawn {
+                agent_id, status, ..
+            } = block
+            {
+                if agent_id == "task-1" {
+                    assert_eq!(*status, SubAgentStatus::Completed);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_task_tool_with_error_fails_sub_agent() {
+        let content = r#"{"type":"user","sessionId":"test-123","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Run task"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"task-1","name":"Task","input":{"subagent_type":"general-purpose","description":"Implement","prompt":"Write code"}}]}}
+{"type":"user","timestamp":"2024-01-15T10:30:10Z","message":{"role":"user","content":[{"tool_use_id":"task-1","type":"tool_result","is_error":true,"content":"Timeout error"}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        // Verify SubAgentMeta is failed
+        assert_eq!(session.sub_agents.len(), 1);
+        assert_eq!(session.sub_agents[0].status, SubAgentStatus::Failed);
+        assert_eq!(
+            session.sub_agents[0].result.as_ref().unwrap(),
+            "Timeout error"
+        );
+
+        // Verify SubAgentSpawn block status is updated
+        for block in &session.blocks {
+            if let Block::SubAgentSpawn {
+                agent_id, status, ..
+            } = block
+            {
+                if agent_id == "task-1" {
+                    assert_eq!(*status, SubAgentStatus::Failed);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_sub_agents() {
+        let content = r#"{"type":"user","sessionId":"test-123","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Help"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"task-1","name":"Task","input":{"subagent_type":"Explore","description":"Explore","prompt":"Find files"}}]}}
+{"type":"user","timestamp":"2024-01-15T10:30:10Z","message":{"role":"user","content":[{"tool_use_id":"task-1","type":"tool_result","content":"Found files"}]}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:11Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"task-2","name":"Task","input":{"subagent_type":"Plan","description":"Plan","prompt":"Make plan"}}]}}
+{"type":"user","timestamp":"2024-01-15T10:30:20Z","message":{"role":"user","content":[{"tool_use_id":"task-2","type":"tool_result","content":"Plan complete"}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        // Both sub-agents should be tracked and completed
+        assert_eq!(session.sub_agents.len(), 2);
+        assert_eq!(session.sub_agents[0].agent_type, "Explore");
+        assert_eq!(session.sub_agents[0].status, SubAgentStatus::Completed);
+        assert_eq!(session.sub_agents[1].agent_type, "Plan");
+        assert_eq!(session.sub_agents[1].status, SubAgentStatus::Completed);
+
+        // Count SubAgentSpawn blocks
+        let sub_agent_blocks: Vec<_> = session
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::SubAgentSpawn { .. }))
+            .collect();
+        assert_eq!(sub_agent_blocks.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_sub_agent_without_result_stays_running() {
+        let content = r#"{"type":"user","sessionId":"test-123","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Start task"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"task-1","name":"Task","input":{"subagent_type":"Explore","description":"Explore","prompt":"Find files"}}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        // Sub-agent should still be running (no result received)
+        assert_eq!(session.sub_agents.len(), 1);
+        assert_eq!(session.sub_agents[0].status, SubAgentStatus::Running);
+        assert!(session.sub_agents[0].completed_at.is_none());
+        assert!(session.sub_agents[0].result.is_none());
+    }
+
+    #[test]
+    fn test_backwards_compatibility_old_sessions_still_parse() {
+        // Old session without Task tool calls should still parse correctly
+        let content = r#"{"type":"user","sessionId":"old-session","timestamp":"2024-01-15T10:30:00Z","message":{"role":"user","content":"Hello"}}
+{"type":"assistant","timestamp":"2024-01-15T10:30:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]}}"#;
+
+        let file = create_test_file(content);
+        let parser = ClaudeParser::new();
+        let session = parser.parse(file.path()).unwrap();
+
+        assert_eq!(session.id, "old-session");
+        assert_eq!(session.blocks.len(), 2);
+        assert!(session.sub_agents.is_empty());
+    }
+
+    #[test]
+    fn test_sub_agent_meta_new() {
+        let ts = DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let meta = SubAgentMeta::new(
+            "agent-1",
+            "Explore",
+            "Explore codebase",
+            "Find main files",
+            ts,
+        );
+
+        assert_eq!(meta.id, "agent-1");
+        assert_eq!(meta.agent_type, "Explore");
+        assert_eq!(meta.description, "Explore codebase");
+        assert_eq!(meta.prompt, "Find main files");
+        assert_eq!(meta.status, SubAgentStatus::Running);
+        assert_eq!(meta.spawned_at, ts);
+        assert!(meta.completed_at.is_none());
+        assert!(meta.result.is_none());
+    }
+
+    #[test]
+    fn test_sub_agent_meta_complete() {
+        let ts = DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let completed_ts = DateTime::parse_from_rfc3339("2024-01-15T10:31:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let mut meta = SubAgentMeta::new("agent-1", "Explore", "Explore", "Find files", ts);
+        meta.complete("Found 5 files", completed_ts);
+
+        assert_eq!(meta.status, SubAgentStatus::Completed);
+        assert_eq!(meta.completed_at, Some(completed_ts));
+        assert_eq!(meta.result, Some("Found 5 files".to_string()));
+    }
+
+    #[test]
+    fn test_sub_agent_meta_fail() {
+        let ts = DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let failed_ts = DateTime::parse_from_rfc3339("2024-01-15T10:31:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let mut meta =
+            SubAgentMeta::new("agent-1", "general-purpose", "Implement", "Write code", ts);
+        meta.fail("Timeout error", failed_ts);
+
+        assert_eq!(meta.status, SubAgentStatus::Failed);
+        assert_eq!(meta.completed_at, Some(failed_ts));
+        assert_eq!(meta.result, Some("Timeout error".to_string()));
     }
 }

@@ -1,5 +1,727 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 11: Open draft PR for M3
+
+### Summary
+Created draft PR for the feature/multi-share branch containing all M3 features.
+
+### Changes
+- Pushed feature/multi-share branch to origin
+- Created draft PR #3: https://github.com/jordangarrison/panko/pull/3
+- Updated prd.json to mark story 11 as complete
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (598 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] All stories 1-10 pass
+- [x] Branch pushed to remote
+- [x] Draft PR via gh CLI targeting main
+- [x] PR includes feature summary and test plan
+
+---
+
+## 2026-01-30 - M3 Story 10: Concurrent share management
+
+### Summary
+Implemented concurrent share management allowing users to start multiple shares simultaneously. The status bar now shows the active share count, and the max_shares limit is configurable via the config command.
+
+### Changes
+- Updated `src/tui/app.rs`:
+  - Modified `render_footer()` to show active share count when shares exist
+  - Shows "📡 X shares (S to manage)" indicator in footer
+  - Added `set_max_shares()` and `max_shares()` methods for configuration
+  - 3 new unit tests for max_shares functionality
+
+- Updated `src/config.rs`:
+  - Added `max_shares: Option<usize>` field to `Config` struct
+  - Added `set_max_shares()` setter method
+  - Added `effective_max_shares()` to get config or default value
+  - Updated `is_empty()` to check max_shares
+  - Updated `format_config()` to display max_shares setting
+  - 8 new unit tests for max_shares configuration
+
+- Updated `src/main.rs`:
+  - Applied max_shares from config on TUI startup
+  - Added "max_shares" key to config set/unset commands
+  - Validates max_shares must be at least 1
+
+### Test Coverage (11 new tests)
+Config tests:
+- `test_max_shares_getter_setter` - getter/setter work
+- `test_max_shares_serialization` - TOML serialization
+- `test_format_config_with_max_shares` - format output with max_shares
+- `test_format_config_without_max_shares` - format output without max_shares
+- `test_effective_max_shares_uses_config` - config value used
+- `test_effective_max_shares_uses_default` - default value used
+- `test_is_empty_with_only_max_shares` - is_empty checks max_shares
+
+App tests:
+- `test_app_max_shares_default` - default is 5
+- `test_app_set_max_shares` - setting max_shares
+- `test_app_can_add_share_respects_max` - respects max limit
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (598 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] 's' starts NEW share (doesn't replace)
+- [x] Each share in own background thread
+- [x] Max limit configurable (default: 5)
+- [x] Status bar shows active share count
+- [x] Clean shutdown of all on exit
+
+---
+
+## 2026-01-30 - M3 Story 9: Shares panel widget
+
+### Summary
+Implemented a shares panel widget that displays all active shares with controls for navigation, URL copying, and stopping individual shares. The panel is toggled with Shift+S and shows session name, URL, provider, and duration for each active share.
+
+### Changes
+- Created `src/tui/widgets/shares_panel.rs`:
+  - `SharesPanelState` struct for managing selection state
+  - `update()` method to sync state with current shares
+  - `select_next()` and `select_previous()` for j/k navigation
+  - `SharesPanel` stateful widget implementing ratatui's `StatefulWidget`
+  - Renders centered popup with share list or empty state message
+  - Shows session name, provider, duration, and truncated URL for each share
+  - Keyboard hints at bottom: j/k navigate, Enter copies URL, d stops share, Esc/S closes
+  - 16 unit tests for state management and rendering
+
+- Updated `src/tui/widgets/mod.rs`:
+  - Added `mod shares_panel`
+  - Exported `SharesPanel`, `SharesPanelState`
+
+- Updated `src/tui/app.rs`:
+  - Added `show_shares_panel: bool` and `shares_panel_state: SharesPanelState` fields to `App`
+  - Added `toggle_shares_panel()` method that updates state with current shares
+  - Added `is_shares_panel_showing()` accessor
+  - Added `selected_active_share()` to get currently selected share
+  - Added `handle_shares_panel_key()` for panel-specific key handling:
+    - j/k or arrows: navigate shares list
+    - Enter: copy selected share's URL
+    - d: stop selected share
+    - Esc or Shift+S: close panel
+    - q or Ctrl+C: close panel and quit
+  - Updated `handle_key_event()` to route to shares panel handler when showing
+  - Changed Shift+S from cycling sort order to toggling shares panel
+  - Updated `render()` to render shares panel overlay
+  - Added `render_shares_panel()` method
+  - 13 new unit tests for shares panel integration
+
+- Updated `src/tui/actions.rs`:
+  - Added `StopShareById(ShareId)` action variant for stopping specific shares
+  - 1 new unit test
+
+- Updated `src/main.rs`:
+  - Added handler for `StopShareById` action
+  - Stops share by ID and updates panel state
+  - Closes panel automatically if no more shares
+
+- Updated `src/tui/widgets/help.rs`:
+  - Changed "S - Cycle sort order" to "S - Show active shares"
+
+### Test Coverage (30 new tests)
+SharesPanelState tests (in shares_panel.rs):
+- `test_shares_panel_state_new` - construction
+- `test_shares_panel_state_default` - default construction
+- `test_shares_panel_state_update_with_shares` - updating with shares
+- `test_shares_panel_state_update_empty` - updating with empty shares
+- `test_shares_panel_state_update_clamps_selection` - selection clamping
+- `test_shares_panel_state_select_next` - next navigation
+- `test_shares_panel_state_select_previous` - previous navigation
+- `test_shares_panel_state_select_next_empty` - empty list safety
+- `test_shares_panel_state_select_previous_empty` - empty list safety
+
+SharesPanel widget tests (in shares_panel.rs):
+- `test_shares_panel_widget_new` - widget creation
+- `test_shares_panel_widget_default` - default widget
+- `test_shares_panel_widget_with_block` - custom block
+- `test_shares_panel_widget_with_styles` - custom styles
+- `test_shares_panel_render_does_not_panic` - render safety
+- `test_shares_panel_render_empty_does_not_panic` - empty render
+- `test_shares_panel_render_small_area` - small terminal handling
+- `test_truncate_url_short` - short URL handling
+- `test_truncate_url_long` - long URL truncation
+- `test_truncate_url_very_short_max` - very short max width
+
+App shares panel tests (in app.rs):
+- `test_shares_panel_initially_not_showing` - default state
+- `test_toggle_shares_panel_on` - opening panel
+- `test_toggle_shares_panel_off` - closing panel
+- `test_handle_key_shift_s_toggles_shares_panel` - Shift+S key handling
+- `test_shares_panel_esc_closes` - Esc closes panel
+- `test_shares_panel_shift_s_closes` - Shift+S closes when open
+- `test_shares_panel_q_closes_and_quits` - q behavior
+- `test_shares_panel_navigation_j_k` - navigation keys
+- `test_shares_panel_enter_with_no_shares_does_nothing` - Enter on empty
+- `test_shares_panel_d_with_no_shares_does_nothing` - d on empty
+- `test_selected_active_share_none_when_empty` - empty share selection
+- `test_shares_panel_ctrl_c_closes_and_quits` - Ctrl+C behavior
+- `test_shares_panel_intercepts_normal_keys` - key interception
+
+Action tests:
+- `test_action_stop_share_by_id` - action variant
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (558 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Shift+S toggles shares panel
+- [x] Lists: session name, URL, provider, duration
+- [x] j/k navigation, Enter copies URL, d stops share
+- [x] 'No active shares' when empty
+- [x] Esc/Shift+S dismisses
+
+---
+
+## 2026-01-30 - M3 Story 8: Share started modal with URL
+
+### Summary
+Added a modal popup that displays when a share successfully starts. The modal shows the session name, public URL (styled in cyan/bold), and provider name. It auto-dismisses after 5 seconds or on any keypress, with 'c' to copy the URL to clipboard.
+
+### Changes
+- Created `src/tui/widgets/share_modal.rs`:
+  - `SHARE_MODAL_TIMEOUT` constant (5 seconds)
+  - `ShareModalState` struct with session_name, public_url, provider_name, shown_at, timeout
+  - `ShareModalState::new()` and `with_timeout()` constructor
+  - `should_dismiss()`, `remaining_time()`, `remaining_seconds()` methods for timeout handling
+  - `ShareModal` stateful widget implementing ratatui's `StatefulWidget`
+  - Widget renders centered popup with session info, URL, and keyboard hints
+  - URL truncated if too long for display area
+  - Shows countdown timer for auto-dismiss
+  - 13 unit tests for modal state and rendering
+
+- Updated `src/tui/widgets/mod.rs`:
+  - Added `mod share_modal`
+  - Exported `ShareModal`, `ShareModalState`, `SHARE_MODAL_TIMEOUT`
+
+- Updated `src/tui/app.rs`:
+  - Added `share_modal_state: Option<ShareModalState>` field to `App`
+  - Added `show_share_modal()`, `dismiss_share_modal()`, `is_share_modal_showing()` methods
+  - Added `share_modal_should_dismiss()`, `share_modal_url()` accessors
+  - Updated `handle_key_event()` to route to `handle_share_modal_key()` when modal showing
+  - Added `handle_share_modal_key()` for modal-specific key handling
+  - Added `render_share_modal()` to render modal on top of other content
+  - Updated `tick()` to auto-dismiss expired modal
+  - 10 new unit tests for modal state management and key handling
+
+- Updated `src/tui/actions.rs`:
+  - Added `CopyShareUrl(String)` action variant for copying URL from modal
+  - 1 new unit test
+
+- Updated `src/main.rs`:
+  - Updated `process_sharing_messages()` to show modal when share starts
+  - Extracts session name from path for modal display
+  - Added `CopyShareUrl` action handler to copy URL to clipboard
+
+### Test Coverage (24 new tests)
+ShareModalState tests (in share_modal.rs):
+- `test_share_modal_state_new` - construction
+- `test_share_modal_state_with_timeout` - custom timeout
+- `test_share_modal_state_should_dismiss_false_initially` - not dismissing immediately
+- `test_share_modal_state_should_dismiss_with_zero_timeout` - instant dismiss
+- `test_share_modal_state_remaining_time` - remaining time calculation
+- `test_share_modal_state_remaining_seconds` - remaining seconds accessor
+
+ShareModal widget tests (in share_modal.rs):
+- `test_share_modal_widget_new` - widget creation
+- `test_share_modal_widget_default` - default widget
+- `test_share_modal_widget_with_block` - custom block
+- `test_share_modal_widget_with_styles` - custom styles
+- `test_share_modal_render_does_not_panic` - render safety
+- `test_share_modal_render_small_area` - small terminal handling
+- `test_share_modal_render_long_url_truncated` - URL truncation
+
+App modal tests (in app.rs):
+- `test_share_modal_initially_not_showing` - default state
+- `test_show_share_modal` - showing modal
+- `test_dismiss_share_modal` - dismissing modal
+- `test_share_modal_should_dismiss_false_initially` - timeout not expired
+- `test_share_modal_key_c_triggers_copy_url` - copy URL action
+- `test_share_modal_key_enter_closes` - Enter closes
+- `test_share_modal_key_esc_closes` - Esc closes
+- `test_share_modal_any_other_key_closes` - any key closes
+- `test_tick_dismisses_expired_modal` - auto-dismiss on tick
+- `test_tick_does_not_dismiss_non_expired_modal` - no early dismiss
+
+Action tests:
+- `test_action_copy_share_url` - action variant
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (555 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Modal appears on SharingMessage::Started
+- [x] Shows: session name, public URL (bold/colored), provider
+- [x] Auto-dismisses after 5 seconds OR on keypress
+- [x] 'c' copies URL to clipboard
+- [x] Esc/Enter closes immediately
+- [x] Uses existing modal pattern
+
+---
+
+## 2026-01-30 - M3 Story 7: Refactor sharing state for multiple shares
+
+### Summary
+Refactored the sharing infrastructure to support multiple concurrent shares. The single `SharingState` is now augmented with a `ShareManager` that tracks multiple `ActiveShare` instances, each with its own `ShareId` for identification and management.
+
+### Changes
+- Updated `src/tui/sharing.rs`:
+  - Added `ShareId` struct with unique ID generation via atomic counter
+  - Added `ActiveShare` struct with id, session_path, public_url, provider_name, started_at
+  - Added `ShareManager` struct for managing multiple concurrent shares
+  - ShareManager tracks `active_shares: Vec<ActiveShare>` and `handles: HashMap<ShareId, SharingHandle>`
+  - Added methods: `can_add_share()`, `add_share()`, `add_pending_share()`, `mark_started()`, `stop_share()`, `stop_all()`, `poll_messages()`, `remove_handle()`
+  - Added `ShareMessage` struct for messages with share ID
+  - Added `duration_string()` helper for human-readable durations
+  - 22 new unit tests for ShareId, ActiveShare, and ShareManager
+
+- Updated `src/tui/app.rs`:
+  - Added `share_manager: ShareManager` field to `App` struct
+  - Added `pending_share_id`, `pending_share_path`, `pending_share_provider` fields for tracking shares being started
+  - Added `DEFAULT_MAX_SHARES` constant (default: 5)
+  - Added accessor methods: `share_manager()`, `share_manager_mut()`, `can_add_share()`, `active_share_count()`
+  - Added pending share methods: `set_pending_share()`, `pending_share_id()`, `take_pending_share()`
+  - Added `stop_share()` and `stop_all_shares()` methods
+  - Updated `clear_sharing_state()` to also clear pending share info
+  - 9 new unit tests for ShareManager integration
+
+- Updated `src/tui/mod.rs`:
+  - Exported `ActiveShare`, `ShareId`, `ShareManager`, `ShareMessage` types
+  - Exported `DEFAULT_MAX_SHARES` constant
+
+- Updated `src/main.rs`:
+  - Removed standalone `sharing_handle: Option<SharingHandle>` tracking
+  - Added `process_sharing_messages()` function to poll all share handles
+  - Updated `handle_tui_action()` to use ShareManager for starting shares
+  - Updated `ShareSession` action to check `can_add_share()` before starting
+  - Updated `StopSharing` action to call `stop_all_shares()`
+  - User quit and error handling now call `app.stop_all_shares()`
+
+### Test Coverage (31 new tests)
+ShareId tests:
+- `test_share_id_new_unique` - unique ID generation
+- `test_share_id_display` - display formatting
+- `test_share_id_as_u64` - numeric value access
+- `test_share_id_eq_and_hash` - equality and hashing
+- `test_share_id_copy_clone` - copy/clone semantics
+
+ActiveShare tests:
+- `test_active_share_new` - construction
+- `test_active_share_session_name` - filename extraction
+- `test_active_share_session_name_no_extension` - handle no extension
+- `test_active_share_duration` - duration tracking
+- `test_active_share_duration_string` - human-readable duration
+
+ShareManager tests:
+- `test_share_manager_new` - construction with max
+- `test_share_manager_default` - default construction
+- `test_share_manager_can_add_share` - capacity checking
+- `test_share_manager_active_count` - active share counting
+- `test_share_manager_has_active_shares` - active share detection
+- `test_share_manager_shares_empty` - empty shares list
+- `test_share_manager_get_share_none` - get missing share
+- `test_share_manager_get_handle_none` - get missing handle
+- `test_share_manager_poll_messages_empty` - poll with no handles
+- `test_share_manager_mark_started` - marking share as started
+- `test_share_manager_stop_all` - stopping all shares
+- `test_share_message_debug` - ShareMessage debug
+
+App ShareManager tests:
+- `test_app_share_manager_default` - default ShareManager in App
+- `test_app_active_share_count_initial` - initial count is 0
+- `test_app_can_add_share_initial` - initially can add shares
+- `test_app_set_pending_share` - setting pending share
+- `test_app_take_pending_share` - taking pending share
+- `test_app_pending_share_id_none_initially` - no pending initially
+- `test_app_stop_all_shares_clears_state` - stop all clears state
+- `test_app_clear_sharing_state_clears_pending` - clear also clears pending
+- `test_app_share_manager_mut_allows_modification` - mutable access
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (501 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] New ActiveShare struct: id, session_path, public_url, provider_name, started_at
+- [x] App.active_shares: Vec<ActiveShare> replaces single state (via ShareManager)
+- [x] App.sharing_handles: HashMap<ShareId, SharingHandle> for handles (via ShareManager)
+- [x] Unique ShareId per share
+- [x] Single-share flow still works (pressing 's')
+- [x] Can stop individual shares by ID
+- [x] Unit tests for new structures
+
+---
+
+## 2026-01-30 - M3 Story 6: Sub-agent flow visualization (web UI)
+
+### Summary
+Added sub-agent flow visualization to the web viewer. Sub-agent spawn blocks now display in a visually distinct, indented style with type badges, expandable prompts and results, and connector lines showing the parent→child relationship.
+
+### Changes
+- Updated `src/server/templates.rs`:
+  - Added `agent_result` field to `BlockView` struct
+  - Created `from_block_with_agents()` method to look up sub-agent results from session metadata
+  - Updated `SessionView::from_session()` to pass sub_agents for result lookup
+  - 6 new unit tests for sub-agent rendering
+
+- Updated `templates/session.html`:
+  - Added `sub_agent_spawn` block type rendering
+  - Shows agent type badge (Explore, Plan, Bash, general-purpose)
+  - Shows agent status indicator (running, completed, failed)
+  - Expandable `<details>` sections for full prompt and result
+  - Visual connector lines using CSS pseudo-elements
+  - Copy button for copying result to clipboard
+
+- Updated `src/assets/styles.css`:
+  - Added `.block-sub-agent` styles with visual indentation (margin-left: 2rem)
+  - Added agent type badges with color coding per type
+  - Added status indicators (running=blue, completed=green, failed=red)
+  - Added connector line styles using `::before` and `::after` pseudo-elements
+  - Added sub-agent prompt and result container styles
+  - Added error styling for failed sub-agent results
+
+### Test Coverage (6 new tests)
+- `test_block_view_sub_agent_spawn_basic` - basic sub-agent rendering
+- `test_block_view_sub_agent_with_result` - completed agent with result lookup
+- `test_block_view_sub_agent_failed` - failed agent rendering
+- `test_session_view_with_sub_agents` - session with sub-agent metadata
+- `test_render_session_with_sub_agent` - full HTML rendering
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (470 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Sub-agent blocks visually indented or in collapsible section
+- [x] Shows agent type badge (Explore, Plan, Bash, etc.)
+- [x] Expandable to see sub-agent's full prompt and results
+- [x] Visual connector lines showing parent→child relationship
+- [x] Option to 'View sub-agent in detail' (expands inline)
+
+---
+
+## 2026-01-30 - M3 Story 5: Parse Task tool for sub-agent tracking
+
+### Summary
+Extended the parser to recognize Task tool calls and track sub-agent spawning. When the Claude Code assistant spawns sub-agents using the Task tool, they are now tracked with metadata including type, prompt, status, and completion results.
+
+### Changes
+- Updated `src/parser/types.rs`:
+  - Added `SubAgentMeta` struct with: id, agent_type, description, prompt, status, spawned_at, completed_at, result
+  - Added `SubAgentStatus` enum with: Running, Completed, Failed
+  - Added `Block::SubAgentSpawn` variant with: agent_id, agent_type, description, prompt, status, timestamp
+  - Added `sub_agents: Vec<SubAgentMeta>` field to `Session` struct (default empty, omitted in JSON when empty)
+  - Added `SubAgentMeta::new()`, `complete()`, and `fail()` methods
+  - Added `Block::sub_agent_spawn()` helper constructor
+  - Updated `Block::timestamp()` to handle SubAgentSpawn
+  - 7 new unit tests for SubAgentSpawn and SubAgentMeta serialization
+
+- Updated `src/parser/claude.rs`:
+  - Added `pending_sub_agents: HashMap<String, usize>` to track spawned agents awaiting results
+  - Added `sub_agents: Vec<SubAgentMeta>` to accumulate agent metadata
+  - Modified `process_assistant_message()` to detect Task tool calls and create SubAgentSpawn blocks
+  - Added `extract_sub_agent_spawn()` helper function
+  - Added `is_error` field to `ContentBlock` for detecting failed tool results
+  - Tool result processing now checks for sub-agent completion and updates status
+  - Session sub_agents field is populated at the end of parsing
+  - 11 new unit tests for sub-agent parsing
+
+- Updated `src/parser/mod.rs`:
+  - Added exports for `SubAgentMeta` and `SubAgentStatus`
+
+- Updated `src/server/templates.rs`:
+  - Added `agent_id`, `agent_type`, `description`, `prompt`, `agent_status` fields to `BlockView`
+  - Added match arm for `Block::SubAgentSpawn` in `from_block()`
+
+- Created `tests/fixtures/session_with_subagents.jsonl`:
+  - Test fixture with multiple Task tool calls (Explore, Plan, general-purpose)
+  - Includes successful completions and error cases
+
+### Test Coverage (18 new tests)
+Type tests in `src/parser/types.rs`:
+- `test_block_serialization_sub_agent_spawn` - serialization roundtrip
+- `test_sub_agent_status_serialization` - status enum serialization
+- `test_sub_agent_meta_serialization` - meta struct serialization
+- `test_session_with_sub_agents` - session with agents roundtrip
+- `test_session_without_sub_agents_omits_field` - empty agents omitted
+- `test_block_timestamp_sub_agent_spawn` - timestamp accessor
+
+Parser tests in `src/parser/claude.rs`:
+- `test_parse_task_tool_creates_sub_agent_spawn_block` - basic Task parsing
+- `test_parse_task_tool_with_result_completes_sub_agent` - completion tracking
+- `test_parse_task_tool_with_error_fails_sub_agent` - error handling
+- `test_parse_multiple_sub_agents` - multiple agents in one session
+- `test_parse_sub_agent_without_result_stays_running` - pending agents
+- `test_backwards_compatibility_old_sessions_still_parse` - backwards compat
+- `test_sub_agent_meta_new` - SubAgentMeta constructor
+- `test_sub_agent_meta_complete` - completion method
+- `test_sub_agent_meta_fail` - failure method
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (465 unit tests + 30 integration tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] New Block::SubAgentSpawn variant with: agent_id, agent_type, prompt, status
+- [x] ClaudeParser detects Task tool calls and extracts sub-agent info
+- [x] Track sub-agent completion via tool results
+- [x] Session gains sub_agents: Vec<SubAgentMeta> for tracking
+- [x] Unit tests with fixture containing Task tool calls
+- [x] Backwards compatible (old sessions still parse)
+
+---
+
+## 2026-01-30 - M3 Story 4: Download session file
+
+### Summary
+Implemented the ability to download session JSONL files from both the web UI and the TUI. Users can click a "Download" button in the web viewer header or press Shift+D in the TUI to save the session file to ~/Downloads.
+
+### Changes
+- Updated `src/tui/actions.rs`:
+  - Added `DownloadSession(PathBuf)` variant to `Action` enum
+  - Added unit test for new action variant
+
+- Updated `src/tui/app.rs`:
+  - Added `KeyCode::Char('D')` handler for Shift+D
+  - Triggers `DownloadSession` action with selected session path
+  - 4 new unit tests for download keybinding
+
+- Updated `src/tui/widgets/help.rs`:
+  - Added "D - Download to ~/Downloads" to Actions section
+
+- Updated `src/server/routes.rs`:
+  - Added `source_path: Option<PathBuf>` to `AppState` struct
+  - Added `/download` route to router
+  - Added `download_handler` that serves the original JSONL file
+  - Sets `Content-Type: application/jsonl` and `Content-Disposition: attachment`
+  - 2 new unit tests for download endpoint
+
+- Updated `src/server/mod.rs`:
+  - Added `run_server_with_source()` function for servers with source path
+  - Added `start_server_with_source()` function for servers with source path
+  - Original `run_server()` and `start_server()` delegate to new functions
+
+- Updated `src/main.rs`:
+  - Updated imports to use `*_with_source` variants
+  - Updated view command to pass source file path to server
+  - Updated share command to pass source file path to server
+  - Updated `handle_view_from_tui()` to pass source file path
+  - Added handler for `DownloadSession` action in `handle_tui_action()`
+  - Added `handle_download_session()` helper function that copies to ~/Downloads
+
+- Updated `templates/session.html`:
+  - Added `.header-actions` container in header
+  - Added download button with link to `/download`
+
+- Updated `src/assets/styles.css`:
+  - Added `.header-actions` container styles
+  - Added `.download-btn` button styles with hover state
+
+### Test Coverage (7 new tests)
+Download action tests:
+- `test_action_download_session` - action variant creation
+
+App keybinding tests:
+- `test_handle_key_shift_d_triggers_download_on_session`
+- `test_handle_key_shift_d_does_nothing_on_project`
+- `test_handle_key_shift_d_does_nothing_when_empty`
+- `test_download_works_regardless_of_focus`
+
+Server route tests:
+- `test_download_handler_no_source_path` - returns 404 without source
+- `test_download_handler_with_source_path` - returns file with proper headers
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (450 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Download button visible in web UI header
+- [x] Downloads original JSONL file with proper filename: {session_id}.jsonl
+- [x] Add download action in TUI: Shift+D to save copy to ~/Downloads
+- [x] Confirmation shows file path: 'Saved to ~/Downloads/abc123.jsonl'
+- [x] Works for shared sessions (download from public URL)
+
+---
+
+## 2026-01-30 - M3 Story 3: Copy context to clipboard (TUI)
+
+### Summary
+Implemented the ability to copy session context to clipboard for reuse in new Claude Code sessions. Users can press Shift+C on a selected session to copy a formatted markdown context including session metadata, user prompts, assistant responses, and summarized tool results.
+
+### Changes
+- Created `src/export/mod.rs`:
+  - New export module for session context formatting and export
+
+- Created `src/export/context.rs`:
+  - `ContextOptions` struct for configuring what to include in output
+  - `ContextFormat` result struct with content, message_count, and estimated_tokens
+  - `format_context()` function that formats a session as markdown
+  - `summarize_tool_input()` for tool-specific input summaries
+  - `summarize_tool_output()` for abbreviated tool results
+  - `truncate_str()` helper for word-boundary truncation
+  - `estimate_tokens()` for approximate token counting (~4 chars/token)
+  - 15 unit tests for context formatting
+
+- Updated `src/lib.rs`:
+  - Added `pub mod export;` to export the new module
+
+- Updated `src/tui/actions.rs`:
+  - Added `CopyContext(PathBuf)` variant to `Action` enum
+  - Added unit test for new action variant
+
+- Updated `src/tui/app.rs`:
+  - Added `KeyCode::Char('C')` handler for Shift+C
+  - Triggers `CopyContext` action with selected session path
+  - 4 new unit tests for copy context keybinding
+
+- Updated `src/tui/widgets/help.rs`:
+  - Added "C - Copy context to clipboard" to Actions section
+
+- Updated `src/main.rs`:
+  - Added import for `format_context` and `ContextOptions`
+  - Added handler for `CopyContext` action in `handle_tui_action()`
+  - Added `handle_copy_context()` helper function
+  - Shows confirmation message with message count and token estimate
+
+### Test Coverage (20 new tests)
+Context formatting tests:
+- `test_format_context_basic` - basic session formatting
+- `test_format_context_excludes_thinking_by_default` - thinking exclusion
+- `test_format_context_includes_thinking_when_enabled` - thinking inclusion
+- `test_format_context_tool_calls` - tool call formatting
+- `test_format_context_file_edit` - file edit formatting
+- `test_summarize_tool_input_read` - Read tool input summary
+- `test_summarize_tool_input_bash` - Bash tool input summary
+- `test_summarize_tool_input_bash_truncates` - long command truncation
+- `test_summarize_tool_output_string` - string output summary
+- `test_summarize_tool_output_object` - object output summary
+- `test_summarize_tool_output_array` - array output summary
+- `test_estimate_tokens` - token estimation
+- `test_truncate_str_short` - short string handling
+- `test_truncate_str_at_word` - word boundary truncation
+- `test_context_options_for_clipboard` - default options
+
+App keybinding tests:
+- `test_handle_key_shift_c_triggers_copy_context_on_session`
+- `test_handle_key_shift_c_does_nothing_on_project`
+- `test_handle_key_shift_c_does_nothing_when_empty`
+- `test_copy_context_works_regardless_of_focus`
+
+Action tests:
+- `test_action_copy_context`
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (443 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Shift+C on selected session triggers copy context
+- [x] Formats session as markdown: user prompts, assistant responses, key tool results
+- [x] Excludes verbose tool outputs (keeps summary only)
+- [x] Shows confirmation: 'Context copied (X messages, ~Y tokens)'
+- [x] Includes session metadata header (project, date)
+- [x] Clipboard content is paste-ready for Claude Code
+
+---
+
+## 2026-01-30 - M3 Story 2: Fix tool output rendering in web UI
+
+### Summary
+Improved tool call rendering in the web viewer to display JSON inputs/outputs in a readable, syntax-highlighted format with copy functionality and smart handling of large outputs.
+
+### Changes
+- Updated `templates/session.html`:
+  - Tool inputs now display as formatted, pretty-printed JSON
+  - Added Copy button to tool input/output blocks
+  - Important tools (Write, Edit, Bash, Read, NotebookEdit) have details expanded by default
+  - Large outputs (>100 lines) start collapsed with "Show full output" button
+  - Added `data-tool-name` attribute for tool type detection
+
+- Updated `src/assets/styles.css`:
+  - Added styles for copy button with hover/active states and "copied" feedback
+  - Added large output handling with max-height, gradient fade, and show/hide button
+  - Added JSON syntax highlighting classes for keys, strings, numbers, booleans, null
+  - Improved tool details summary styling with expand/collapse arrow indicator
+
+- Updated `src/assets/keyboard.js`:
+  - Added `highlightJson()` function for JSON syntax highlighting
+  - Added `applyJsonHighlighting()` to apply highlighting on page load
+  - Added `copyToClipboard()` with visual feedback on success/failure
+  - Added `handleCopyClick()` for copy button event handling
+  - Added `handleShowFullClick()` for large output toggle
+
+- Updated `src/server/templates.rs`:
+  - Added `output_lines` field to `BlockView` for line counting
+  - Line counting handles both actual newlines and escaped `\n` sequences
+  - Added 3 new unit tests for output line counting
+
+### Test Coverage (3 new tests)
+- `test_block_view_tool_call_output_lines_json` - JSON object line counting
+- `test_block_view_tool_call_output_lines_string` - Multi-line string content
+- `test_block_view_tool_call_output_lines_escaped_string` - Escaped newline counting
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (424 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Tool inputs display as formatted, syntax-highlighted JSON (not minified)
+- [x] Long tool outputs wrap properly with horizontal scroll only when needed
+- [x] Tool <details> sections default to expanded for important tools (Write, Edit, Bash)
+- [x] Add 'Copy' button to tool input/output blocks
+- [x] Syntax highlighting for JSON in tool blocks
+- [x] Large outputs (>100 lines) stay collapsed with 'Show full output' option
+
+---
+
 ## 2026-01-30 - M2 Story 15: Open draft PR for milestone
 
 ### Summary

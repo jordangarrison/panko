@@ -1,5 +1,5 @@
 /**
- * Agent Replay - Keyboard Navigation
+ * Panko - Keyboard Navigation and Tool Interactions
  *
  * Provides vim-style navigation between session blocks:
  * - j/Down: Next block
@@ -9,6 +9,11 @@
  * - G: Go to last block
  * - ?: Show keyboard shortcuts help
  * - Escape: Close help overlay
+ *
+ * Also handles:
+ * - Copy buttons for tool inputs/outputs
+ * - Show/hide large outputs
+ * - JSON syntax highlighting
  */
 
 (function() {
@@ -17,6 +22,178 @@
     // State for multi-key commands (like 'gg')
     let pendingKey = null;
     let pendingKeyTimeout = null;
+
+    // JSON syntax highlighting
+    function highlightJson(code) {
+        if (!code || code.trim() === '') return code;
+
+        // Escape HTML first
+        const escaped = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        // Apply JSON syntax highlighting
+        return escaped
+            // Strings (including keys)
+            .replace(/"([^"\\]|\\.)*"/g, function(match) {
+                // Check if it looks like a key (followed by :)
+                return '<span class="json-string">' + match + '</span>';
+            })
+            // Numbers
+            .replace(/\b(-?\d+\.?\d*([eE][+-]?\d+)?)\b/g, '<span class="json-number">$1</span>')
+            // Booleans
+            .replace(/\b(true|false)\b/g, '<span class="json-boolean">$1</span>')
+            // Null
+            .replace(/\bnull\b/g, '<span class="json-null">null</span>');
+    }
+
+    // Apply syntax highlighting to all JSON code blocks
+    function applyJsonHighlighting() {
+        document.querySelectorAll('.json-code code').forEach(function(codeElement) {
+            if (codeElement.dataset.highlighted) return; // Skip if already highlighted
+            const original = codeElement.textContent;
+            codeElement.innerHTML = highlightJson(original);
+            codeElement.dataset.highlighted = 'true';
+        });
+    }
+
+    // Copy text to clipboard
+    function copyToClipboard(text, button) {
+        navigator.clipboard.writeText(text).then(function() {
+            // Show success state
+            const originalText = button.textContent;
+            button.textContent = 'Copied!';
+            button.classList.add('copied');
+
+            setTimeout(function() {
+                button.textContent = originalText;
+                button.classList.remove('copied');
+            }, 2000);
+        }).catch(function(err) {
+            console.error('Failed to copy:', err);
+            button.textContent = 'Error';
+            setTimeout(function() {
+                button.textContent = 'Copy';
+            }, 2000);
+        });
+    }
+
+    // Extract all session content as plain text
+    function extractSessionText() {
+        const blocks = document.querySelectorAll('.block');
+        const parts = [];
+
+        blocks.forEach(function(block) {
+            const type = block.getAttribute('data-type');
+            const content = block.querySelector('.block-content');
+            const toolName = block.getAttribute('data-tool-name');
+
+            if (type === 'user_prompt') {
+                parts.push('User:\n' + (content ? content.textContent.trim() : ''));
+            } else if (type === 'assistant_response') {
+                parts.push('Assistant:\n' + (content ? content.textContent.trim() : ''));
+            } else if (type === 'thinking') {
+                parts.push('Thinking:\n' + (content ? content.textContent.trim() : ''));
+            } else if (type === 'tool_call') {
+                const input = block.querySelector('.tool-input code');
+                const output = block.querySelector('.tool-output code');
+                let toolText = 'Tool (' + (toolName || 'unknown') + '):\n';
+                if (input) {
+                    toolText += 'Input: ' + input.textContent.trim();
+                }
+                if (output) {
+                    toolText += '\nOutput: ' + output.textContent.trim();
+                }
+                parts.push(toolText);
+            } else if (type === 'sub_agent_spawn') {
+                const description = block.querySelector('.sub-agent-description');
+                const result = block.querySelector('.sub-agent-result code');
+                let agentText = 'Sub-Agent:\n';
+                if (description) {
+                    agentText += description.textContent.trim();
+                }
+                if (result) {
+                    agentText += '\nResult: ' + result.textContent.trim();
+                }
+                parts.push(agentText);
+            } else if (type === 'file_edit') {
+                const diff = block.querySelector('.diff code');
+                parts.push('File Edit:\n' + (diff ? diff.textContent.trim() : ''));
+            }
+        });
+
+        return parts.join('\n\n---\n\n');
+    }
+
+    // Copy all session content to clipboard
+    function copyAllSession() {
+        const button = document.querySelector('.copy-all-btn');
+        const text = extractSessionText();
+
+        navigator.clipboard.writeText(text).then(function() {
+            // Show success state
+            if (button) {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+
+                setTimeout(function() {
+                    button.textContent = originalText;
+                    button.classList.remove('copied');
+                }, 2000);
+            }
+        }).catch(function(err) {
+            console.error('Failed to copy session:', err);
+            if (button) {
+                button.textContent = 'Error';
+                setTimeout(function() {
+                    button.textContent = '📋 Copy All';
+                }, 2000);
+            }
+        });
+    }
+
+    // Handle copy button clicks
+    function handleCopyClick(event) {
+        const button = event.target;
+        if (!button.classList.contains('copy-btn')) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const details = button.closest('.tool-details');
+        if (!details) return;
+
+        const codeElement = details.querySelector('pre code');
+        if (!codeElement) return;
+
+        // Get the original text content (not highlighted HTML)
+        const text = codeElement.textContent;
+        copyToClipboard(text, button);
+    }
+
+    // Handle show full output button clicks
+    function handleShowFullClick(event) {
+        const button = event.target;
+        if (!button.classList.contains('show-full-btn')) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const wrapper = button.closest('.tool-code-wrapper');
+        if (!wrapper) return;
+
+        if (wrapper.classList.contains('collapsed')) {
+            wrapper.classList.remove('collapsed');
+            wrapper.classList.add('expanded');
+            button.textContent = 'Show less';
+        } else {
+            wrapper.classList.remove('expanded');
+            wrapper.classList.add('collapsed');
+            button.textContent = 'Show full output';
+        }
+    }
 
     // Get all navigable blocks
     function getBlocks() {
@@ -186,6 +363,11 @@
                 event.preventDefault();
                 break;
 
+            case 'c':
+                copyAllSession();
+                event.preventDefault();
+                break;
+
             case '?':
                 showHelp();
                 event.preventDefault();
@@ -219,6 +401,21 @@
                 }
             });
         }
+
+        // Copy All button click
+        const copyAllBtn = document.querySelector('.copy-all-btn');
+        if (copyAllBtn) {
+            copyAllBtn.addEventListener('click', copyAllSession);
+        }
+
+        // Copy button clicks (using event delegation)
+        document.addEventListener('click', handleCopyClick);
+
+        // Show full output button clicks (using event delegation)
+        document.addEventListener('click', handleShowFullClick);
+
+        // Apply JSON syntax highlighting
+        applyJsonHighlighting();
 
         // Focus first block on page load (after a small delay for rendering)
         setTimeout(function() {

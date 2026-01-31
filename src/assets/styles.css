@@ -1,4 +1,4 @@
-/* Agent Replay - Minimal readable styles */
+/* Panko - Minimal readable styles */
 
 * {
     box-sizing: border-box;
@@ -147,6 +147,192 @@ body {
     color: var(--accent-file);
 }
 
+/* Sub-agent block styles */
+.block-sub-agent {
+    background: var(--bg-secondary);
+    border-left: 3px solid #06b6d4; /* cyan for sub-agents */
+    margin-left: 2rem; /* Visual indentation for nested agents */
+}
+
+.block-sub-agent .block-label {
+    color: #06b6d4;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Agent type badges */
+.agent-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.agent-badge-explore {
+    background: #3b82f6;
+    color: white;
+}
+
+.agent-badge-plan {
+    background: #8b5cf6;
+    color: white;
+}
+
+.agent-badge-bash {
+    background: #f59e0b;
+    color: white;
+}
+
+.agent-badge-general-purpose {
+    background: #10b981;
+    color: white;
+}
+
+/* Fallback for unknown agent types */
+.agent-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+/* Agent status indicators */
+.agent-status {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.agent-status-running {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+}
+
+.agent-status-completed {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.agent-status-failed {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+/* Sub-agent content layout with connector */
+.sub-agent-content {
+    display: flex;
+    position: relative;
+}
+
+.sub-agent-connector {
+    width: 24px;
+    flex-shrink: 0;
+    position: relative;
+}
+
+/* Visual connector line */
+.sub-agent-connector::before {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom, #06b6d4 0%, var(--border-color) 100%);
+}
+
+.sub-agent-connector::after {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 16px;
+    width: 12px;
+    height: 2px;
+    background: #06b6d4;
+}
+
+.sub-agent-body {
+    flex-grow: 1;
+    padding: 1rem;
+    padding-left: 0.5rem;
+}
+
+.sub-agent-description {
+    font-weight: 500;
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+}
+
+/* Sub-agent details (prompt and result) */
+.sub-agent-details {
+    margin-top: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.sub-agent-details summary {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    list-style: none;
+}
+
+.sub-agent-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.sub-agent-details summary::before {
+    content: "▶";
+    display: inline-block;
+    margin-right: 0.5rem;
+    transition: transform 0.15s ease;
+    font-size: 0.7rem;
+}
+
+.sub-agent-details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.sub-agent-details summary:hover {
+    background: var(--border-color);
+}
+
+.sub-agent-prompt {
+    padding: 1rem;
+    background: var(--code-bg);
+    font-size: 0.875rem;
+}
+
+.sub-agent-result {
+    padding: 0;
+    background: var(--code-bg);
+}
+
+.sub-agent-result pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.sub-agent-result-error {
+    border-left: 3px solid #ef4444;
+}
+
+.sub-agent-result-error pre {
+    color: #fca5a5;
+}
+
 /* Tool details */
 .tool-details {
     margin: 0;
@@ -159,10 +345,64 @@ body {
     font-size: 0.875rem;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    list-style: none;
+}
+
+.tool-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.tool-details summary::before {
+    content: "▶";
+    display: inline-block;
+    margin-right: 0.5rem;
+    transition: transform 0.15s ease;
+    font-size: 0.7rem;
+}
+
+.tool-details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.tool-details .summary-text {
+    flex-grow: 1;
 }
 
 .tool-details summary:hover {
     background: var(--border-color);
+}
+
+/* Copy button */
+.copy-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.copy-btn:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border-color: var(--accent-tool);
+}
+
+.copy-btn.copied {
+    background: var(--accent-assistant);
+    color: white;
+    border-color: var(--accent-assistant);
+}
+
+/* Tool code wrapper */
+.tool-code-wrapper {
+    position: relative;
 }
 
 .tool-input,
@@ -171,6 +411,91 @@ body {
     padding: 1rem;
     background: var(--code-bg);
     overflow-x: auto;
+    max-height: none;
+}
+
+/* Large output handling */
+.tool-code-wrapper.large-output.collapsed {
+    max-height: 400px;
+    overflow: hidden;
+}
+
+.tool-code-wrapper.large-output.collapsed .tool-output {
+    max-height: 350px;
+    overflow: hidden;
+}
+
+.output-fade {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    right: 0;
+    height: 80px;
+    background: linear-gradient(transparent, var(--code-bg));
+    pointer-events: none;
+}
+
+.tool-code-wrapper.expanded .output-fade {
+    display: none;
+}
+
+.show-full-btn {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 0.75rem;
+    font-size: 0.875rem;
+    font-family: var(--font-sans);
+    background: var(--bg-tertiary);
+    border: none;
+    border-top: 1px solid var(--border-color);
+    color: var(--accent-tool);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.show-full-btn:hover {
+    background: var(--border-color);
+    color: var(--text-primary);
+}
+
+.tool-code-wrapper.expanded .show-full-btn {
+    position: static;
+}
+
+.tool-code-wrapper.expanded {
+    max-height: none;
+}
+
+.tool-code-wrapper.expanded .tool-output {
+    max-height: none;
+}
+
+/* JSON syntax highlighting */
+.json-code .json-key {
+    color: #79c0ff;
+}
+
+.json-code .json-string {
+    color: #a5d6ff;
+}
+
+.json-code .json-number {
+    color: #d2a8ff;
+}
+
+.json-code .json-boolean {
+    color: #ff7b72;
+}
+
+.json-code .json-null {
+    color: #8b949e;
+    font-style: italic;
+}
+
+.json-code .json-punctuation {
+    color: var(--text-secondary);
 }
 
 /* Code and diff styling */
@@ -270,12 +595,71 @@ code {
     box-shadow: 0 0 12px rgba(74, 158, 255, 0.3);
 }
 
-/* Help hint button in header */
-.help-hint {
+/* Header actions container */
+.header-actions {
     position: absolute;
     right: 1rem;
     top: 50%;
     transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Download button in header */
+.download-btn {
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: all 0.2s ease;
+}
+
+.download-btn:hover {
+    border-color: var(--accent-user);
+    color: var(--accent-user);
+    background: var(--bg-secondary);
+}
+
+/* Copy All button in header */
+.copy-all-btn {
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: all 0.2s ease;
+    font-family: var(--font-sans);
+}
+
+.copy-all-btn:hover {
+    border-color: var(--accent-assistant);
+    color: var(--accent-assistant);
+    background: var(--bg-secondary);
+}
+
+.copy-all-btn.copied {
+    background: var(--accent-assistant);
+    color: white;
+    border-color: var(--accent-assistant);
+}
+
+/* Help hint button in header */
+.help-hint {
     width: 28px;
     height: 28px;
     border-radius: 50%;

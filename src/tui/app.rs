@@ -2,9 +2,11 @@
 
 use crate::scanner::{ScannerRegistry, SessionMeta};
 use crate::tui::actions::Action;
+use crate::tui::sharing::{ShareId, ShareManager, SharingMessage};
 use crate::tui::widgets::{
     ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
-    ProviderSelectState, SessionList, SessionListState, SortOrder,
+    ProviderSelectState, SessionList, SessionListState, ShareModal, ShareModalState, SharesPanel,
+    SharesPanelState, SortOrder,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -12,6 +14,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use std::path::PathBuf;
+
+/// Default maximum number of concurrent shares.
+pub const DEFAULT_MAX_SHARES: usize = 5;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -145,7 +150,7 @@ pub struct App {
     search_active: bool,
     /// Pending action to be executed outside the TUI loop
     pending_action: Action,
-    /// Current sharing state
+    /// Current sharing state (for UI state transitions)
     sharing_state: SharingState,
     /// Provider selection state (when showing provider popup)
     provider_select_state: ProviderSelectState,
@@ -157,6 +162,20 @@ pub struct App {
     refresh_state: RefreshState,
     /// Current confirmation state (for delete dialog)
     confirmation_state: ConfirmationState,
+    /// Manager for multiple concurrent shares
+    share_manager: ShareManager,
+    /// The share ID currently being started (waiting for Started message)
+    pending_share_id: Option<ShareId>,
+    /// The session path for the pending share
+    pending_share_path: Option<PathBuf>,
+    /// The provider name for the pending share
+    pending_share_provider: Option<String>,
+    /// State for the share started modal (shown when sharing starts)
+    share_modal_state: Option<ShareModalState>,
+    /// Whether the shares panel is visible
+    show_shares_panel: bool,
+    /// State for the shares panel
+    shares_panel_state: SharesPanelState,
 }
 
 impl Default for App {
@@ -183,6 +202,13 @@ impl App {
             show_help: false,
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
+            share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            pending_share_id: None,
+            pending_share_path: None,
+            pending_share_provider: None,
+            share_modal_state: None,
+            show_shares_panel: false,
+            shares_panel_state: SharesPanelState::new(),
         }
     }
 
@@ -203,6 +229,13 @@ impl App {
             show_help: false,
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
+            share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            pending_share_id: None,
+            pending_share_path: None,
+            pending_share_provider: None,
+            share_modal_state: None,
+            show_shares_panel: false,
+            shares_panel_state: SharesPanelState::new(),
         }
     }
 
@@ -262,6 +295,16 @@ impl App {
         self.session_list_state.set_sort_order(sort_order);
     }
 
+    /// Set the maximum number of concurrent shares.
+    pub fn set_max_shares(&mut self, max_shares: usize) {
+        self.share_manager.max_shares = max_shares;
+    }
+
+    /// Get the maximum number of concurrent shares.
+    pub fn max_shares(&self) -> usize {
+        self.share_manager.max_shares
+    }
+
     /// Returns true if the application is running.
     pub fn is_running(&self) -> bool {
         self.running
@@ -274,7 +317,10 @@ impl App {
 
     /// Handle a tick event.
     pub fn tick(&mut self) {
-        // Update any time-based state here
+        // Check if share modal should auto-dismiss
+        if self.share_modal_should_dismiss() {
+            self.dismiss_share_modal();
+        }
     }
 
     /// Handle terminal resize.
@@ -291,6 +337,11 @@ impl App {
             return Ok(());
         }
 
+        // Handle share modal (shown when sharing starts)
+        if self.is_share_modal_showing() {
+            return self.handle_share_modal_key(key_event);
+        }
+
         // Route key events based on current state
         if self.sharing_state.is_selecting_provider() {
             return self.handle_provider_select_key(key_event);
@@ -298,6 +349,11 @@ impl App {
 
         if self.sharing_state.is_active() {
             return self.handle_sharing_key(key_event);
+        }
+
+        // Handle shares panel (shown with Shift+S)
+        if self.show_shares_panel {
+            return self.handle_shares_panel_key(key_event);
         }
 
         // Handle confirmation dialog (delete confirmation)
@@ -387,9 +443,21 @@ impl App {
             KeyCode::Char('r') => {
                 let _ = self.refresh_sessions();
             }
-            // Sort: S (shift+s) to cycle sort order
+            // Shares panel: S (shift+s) to toggle shares panel
             KeyCode::Char('S') => {
-                self.session_list_state.cycle_sort_order();
+                self.toggle_shares_panel();
+            }
+            // Copy context: C (shift+c) to copy session context to clipboard
+            KeyCode::Char('C') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::CopyContext(session.path.clone());
+                }
+            }
+            // Download: D (shift+d) to download session to ~/Downloads
+            KeyCode::Char('D') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::DownloadSession(session.path.clone());
+                }
             }
             // Delete: d to delete selected session (with confirmation)
             KeyCode::Char('d') => {
@@ -545,6 +613,29 @@ impl App {
         Ok(())
     }
 
+    /// Handle key events when the share modal is showing.
+    fn handle_share_modal_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // Copy URL to clipboard
+            KeyCode::Char('c') => {
+                if let Some(url) = self.share_modal_url() {
+                    // Signal to copy URL - main loop handles clipboard
+                    self.pending_action = Action::CopyShareUrl(url.to_string());
+                }
+                // Keep modal open after copying
+            }
+            // Close modal immediately
+            KeyCode::Enter | KeyCode::Esc => {
+                self.dismiss_share_modal();
+            }
+            // Any other key also closes modal
+            _ => {
+                self.dismiss_share_modal();
+            }
+        }
+        Ok(())
+    }
+
     /// Handle key events when actively sharing.
     fn handle_sharing_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
         match key_event.code {
@@ -650,6 +741,166 @@ impl App {
     /// Clear the sharing state (after stopping).
     pub fn clear_sharing_state(&mut self) {
         self.sharing_state = SharingState::Inactive;
+        self.pending_share_id = None;
+        self.pending_share_path = None;
+        self.pending_share_provider = None;
+    }
+
+    /// Get a reference to the share manager.
+    pub fn share_manager(&self) -> &ShareManager {
+        &self.share_manager
+    }
+
+    /// Get a mutable reference to the share manager.
+    pub fn share_manager_mut(&mut self) -> &mut ShareManager {
+        &mut self.share_manager
+    }
+
+    /// Check if we can start a new share (not at max capacity).
+    pub fn can_add_share(&self) -> bool {
+        self.share_manager.can_add_share()
+    }
+
+    /// Get the number of active shares.
+    pub fn active_share_count(&self) -> usize {
+        self.share_manager.active_count()
+    }
+
+    /// Set the pending share info (when starting a new share).
+    pub fn set_pending_share(&mut self, id: ShareId, path: PathBuf, provider: String) {
+        self.pending_share_id = Some(id);
+        self.pending_share_path = Some(path);
+        self.pending_share_provider = Some(provider);
+    }
+
+    /// Get the pending share ID.
+    pub fn pending_share_id(&self) -> Option<ShareId> {
+        self.pending_share_id
+    }
+
+    /// Check if there's a pending share waiting for a Started message.
+    pub fn has_pending_share(&self) -> bool {
+        self.pending_share_id.is_some()
+    }
+
+    /// Clear the pending share info and return the values.
+    pub fn take_pending_share(&mut self) -> Option<(ShareId, PathBuf, String)> {
+        let id = self.pending_share_id.take()?;
+        let path = self.pending_share_path.take()?;
+        let provider = self.pending_share_provider.take()?;
+        Some((id, path, provider))
+    }
+
+    /// Stop a share by ID.
+    pub fn stop_share(&mut self, id: ShareId) {
+        self.share_manager.stop_share(id);
+        // If this was the only share, clear the legacy sharing state
+        if !self.share_manager.has_active_shares() {
+            self.sharing_state = SharingState::Inactive;
+        }
+    }
+
+    /// Stop all active shares.
+    pub fn stop_all_shares(&mut self) {
+        self.share_manager.stop_all();
+        self.sharing_state = SharingState::Inactive;
+        self.pending_share_id = None;
+        self.pending_share_path = None;
+        self.pending_share_provider = None;
+    }
+
+    /// Show the share started modal.
+    pub fn show_share_modal(
+        &mut self,
+        session_name: String,
+        public_url: String,
+        provider_name: String,
+    ) {
+        self.share_modal_state = Some(ShareModalState::new(
+            session_name,
+            public_url,
+            provider_name,
+        ));
+    }
+
+    /// Dismiss the share modal.
+    pub fn dismiss_share_modal(&mut self) {
+        self.share_modal_state = None;
+    }
+
+    /// Check if the share modal is showing.
+    pub fn is_share_modal_showing(&self) -> bool {
+        self.share_modal_state.is_some()
+    }
+
+    /// Check if the share modal should auto-dismiss (timeout elapsed).
+    pub fn share_modal_should_dismiss(&self) -> bool {
+        self.share_modal_state
+            .as_ref()
+            .map(|s| s.should_dismiss())
+            .unwrap_or(false)
+    }
+
+    /// Get the public URL from the share modal (for copying).
+    pub fn share_modal_url(&self) -> Option<&str> {
+        self.share_modal_state
+            .as_ref()
+            .map(|s| s.public_url.as_str())
+    }
+
+    /// Process pending share messages from background threads.
+    ///
+    /// This is called inline during the TUI event loop tick to handle
+    /// share state transitions without leaving the alternate screen,
+    /// which prevents screen flickering.
+    pub fn process_share_messages(&mut self) {
+        let messages = self.share_manager.poll_messages();
+        let mut shares_to_remove: Vec<ShareId> = Vec::new();
+
+        for (share_id, msg) in messages {
+            match msg {
+                SharingMessage::Started { url } => {
+                    // Copy URL to clipboard
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&url);
+                    }
+                    // Handle pending share state transitions
+                    if let Some((pending_id, path, provider)) = self.take_pending_share() {
+                        if pending_id == share_id {
+                            let session_name = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            self.share_manager.mark_started(
+                                share_id,
+                                path,
+                                url.clone(),
+                                provider.clone(),
+                            );
+                            self.set_sharing_active(url.clone(), provider.clone());
+                            self.show_share_modal(session_name, url, provider);
+                        }
+                    }
+                }
+                SharingMessage::Error { .. } => {
+                    shares_to_remove.push(share_id);
+                    if self.pending_share_id() == Some(share_id) {
+                        self.clear_sharing_state();
+                    }
+                }
+                SharingMessage::Stopped => {
+                    shares_to_remove.push(share_id);
+                }
+            }
+        }
+
+        for id in shares_to_remove {
+            self.share_manager.remove_handle(id);
+            if !self.share_manager.has_active_shares() {
+                self.clear_sharing_state();
+            }
+        }
     }
 
     /// Set a status message to display in the footer.
@@ -700,6 +951,69 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Handle key events when the shares panel is showing.
+    fn handle_shares_panel_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // Navigation
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.shares_panel_state.select_next();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.shares_panel_state.select_previous();
+            }
+            // Enter: copy selected share's URL
+            KeyCode::Enter => {
+                if let Some(share) = self.selected_active_share() {
+                    self.pending_action = Action::CopyShareUrl(share.public_url.clone());
+                    self.set_status_message("✓ URL copied to clipboard");
+                }
+            }
+            // d: stop selected share
+            KeyCode::Char('d') => {
+                if let Some(share) = self.selected_active_share() {
+                    let id = share.id;
+                    self.pending_action = Action::StopShareById(id);
+                }
+            }
+            // Escape or Shift+S: close panel
+            KeyCode::Esc | KeyCode::Char('S') => {
+                self.show_shares_panel = false;
+            }
+            // Quit still works
+            KeyCode::Char('q') => {
+                self.show_shares_panel = false;
+                self.quit();
+            }
+            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.show_shares_panel = false;
+                self.quit();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Toggle the shares panel visibility.
+    pub fn toggle_shares_panel(&mut self) {
+        self.show_shares_panel = !self.show_shares_panel;
+        if self.show_shares_panel {
+            // Update the shares panel state with current shares
+            self.shares_panel_state.update(self.share_manager.shares());
+        }
+    }
+
+    /// Check if the shares panel is showing.
+    pub fn is_shares_panel_showing(&self) -> bool {
+        self.show_shares_panel
+    }
+
+    /// Get the currently selected active share (for shares panel).
+    pub fn selected_active_share(&self) -> Option<&crate::tui::sharing::ActiveShare> {
+        let shares = self.share_manager.shares();
+        let idx = self.shares_panel_state.selected();
+        shares.get(idx)
     }
 
     /// Remove a session from the list by its file path.
@@ -753,6 +1067,33 @@ impl App {
         if self.show_help {
             self.render_help_overlay(frame, area);
         }
+
+        // Render shares panel if visible
+        if self.show_shares_panel {
+            self.render_shares_panel(frame, area);
+        }
+
+        // Render share modal if visible (highest priority - on top of everything)
+        if self.is_share_modal_showing() {
+            self.render_share_modal(frame, area);
+        }
+    }
+
+    /// Render the shares panel.
+    fn render_shares_panel(&mut self, frame: &mut Frame, area: Rect) {
+        // Always sync shares state before rendering to ensure panel is up-to-date
+        self.shares_panel_state.update(self.share_manager.shares());
+        let shares = self.share_manager.shares();
+        let widget = SharesPanel::new(shares);
+        frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
+    }
+
+    /// Render the share started modal.
+    fn render_share_modal(&mut self, frame: &mut Frame, area: Rect) {
+        if let Some(ref mut state) = self.share_modal_state {
+            let widget = ShareModal::new();
+            frame.render_stateful_widget(widget, area, state);
+        }
     }
 
     /// Render the provider selection popup.
@@ -778,7 +1119,7 @@ impl App {
     /// Render message when terminal is too small.
     fn render_too_small(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default()
-            .title(" Agent Replay ")
+            .title(" Panko ")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded);
@@ -820,7 +1161,7 @@ impl App {
     /// Render the header section.
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default()
-            .title(" Agent Replay ")
+            .title(" Panko ")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded);
@@ -1048,20 +1389,6 @@ impl App {
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
             )])
-        } else if let Some(url) = self.sharing_state.public_url() {
-            // Sharing is active - show URL and stop hint
-            Line::from(vec![
-                Span::styled("🌐 Sharing at ", Style::default().fg(Color::Green)),
-                Span::styled(
-                    url,
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" - press ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Esc", Style::default().fg(Color::Yellow)),
-                Span::styled(" to stop", Style::default().fg(Color::DarkGray)),
-            ])
         } else if matches!(self.sharing_state, SharingState::Starting { .. }) {
             // Starting sharing - show loading message
             Line::from(vec![Span::styled(
@@ -1081,8 +1408,9 @@ impl App {
                 Style::default().fg(Color::Yellow),
             )])
         } else {
-            // Normal footer
-            Line::from(vec![
+            // Build the base footer with optional share count indicator
+            let share_count = self.share_manager.active_count();
+            let mut spans = vec![
                 Span::styled(" v ", Style::default().fg(Color::Cyan)),
                 Span::raw("view  "),
                 Span::styled("s ", Style::default().fg(Color::Cyan)),
@@ -1095,7 +1423,28 @@ impl App {
                 Span::raw("refresh  "),
                 Span::styled("q ", Style::default().fg(Color::Cyan)),
                 Span::raw("quit"),
-            ])
+            ];
+
+            // If there are active shares, add indicator at the end
+            if share_count > 0 {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!(
+                        "📡 {} {}",
+                        share_count,
+                        if share_count == 1 { "share" } else { "shares" }
+                    ),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    " (S to manage)",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            Line::from(spans)
         };
 
         let paragraph = Paragraph::new(content)
@@ -1867,6 +2216,118 @@ mod tests {
         assert!(matches!(app.pending_action(), Action::OpenFolder(_)));
     }
 
+    // Tests for copy context action (Shift+C)
+
+    #[test]
+    fn test_handle_key_shift_c_triggers_copy_context_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'C' (Shift+C) to copy context
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+
+        // Should have a pending CopyContext action
+        assert!(app.has_pending_action());
+        match app.pending_action() {
+            Action::CopyContext(path) => {
+                assert!(path.to_string_lossy().contains("abc12345.jsonl"));
+            }
+            _ => panic!("Expected CopyContext action"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_shift_c_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // First item is a project, not a session
+        assert!(app.selected_session().is_none());
+
+        // Press 'C' (Shift+C) on project
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+
+        // Should not have a pending action since we're on a project, not a session
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_shift_c_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'C' (Shift+C) with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_copy_context_works_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Press 'C' (Shift+C) - should still work since we have a selected session
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::CopyContext(_)));
+    }
+
+    // Tests for Shift+D download action
+
+    #[test]
+    fn test_handle_key_shift_d_triggers_download_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Select the first session (not a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'D' (Shift+D)
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+
+        // Should have a pending download action
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::DownloadSession(_)));
+    }
+
+    #[test]
+    fn test_handle_key_shift_d_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Don't select - starts on a project header
+
+        // Press 'D' (Shift+D)
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+
+        // Should not have a pending action (selected item is project, not session)
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_shift_d_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'D' (Shift+D) with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_download_works_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Press 'D' (Shift+D) - should still work since we have a selected session
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::DownloadSession(_)));
+    }
+
     // Tests for fuzzy search
 
     #[test]
@@ -2494,5 +2955,447 @@ mod tests {
                 assert!(!matches!(state, SharingState::Inactive));
             }
         }
+    }
+
+    // ShareManager integration tests
+
+    #[test]
+    fn test_app_share_manager_default() {
+        let app = App::new();
+        assert_eq!(app.share_manager().active_count(), 0);
+        assert!(!app.share_manager().has_active_shares());
+        assert!(app.can_add_share());
+    }
+
+    #[test]
+    fn test_app_active_share_count_initial() {
+        let app = App::new();
+        assert_eq!(app.active_share_count(), 0);
+    }
+
+    #[test]
+    fn test_app_can_add_share_initial() {
+        let app = App::new();
+        assert!(app.can_add_share());
+    }
+
+    #[test]
+    fn test_app_set_pending_share() {
+        let mut app = App::new();
+        let id = ShareId::new();
+        let path = PathBuf::from("/test/path.jsonl");
+        let provider = "cloudflare".to_string();
+
+        app.set_pending_share(id, path.clone(), provider.clone());
+
+        assert_eq!(app.pending_share_id(), Some(id));
+    }
+
+    #[test]
+    fn test_app_take_pending_share() {
+        let mut app = App::new();
+        let id = ShareId::new();
+        let path = PathBuf::from("/test/path.jsonl");
+        let provider = "cloudflare".to_string();
+
+        app.set_pending_share(id, path.clone(), provider.clone());
+
+        let result = app.take_pending_share();
+        assert!(result.is_some());
+
+        let (taken_id, taken_path, taken_provider) = result.unwrap();
+        assert_eq!(taken_id, id);
+        assert_eq!(taken_path, path);
+        assert_eq!(taken_provider, provider);
+
+        // Should be cleared now
+        assert_eq!(app.pending_share_id(), None);
+        assert!(app.take_pending_share().is_none());
+    }
+
+    #[test]
+    fn test_app_pending_share_id_none_initially() {
+        let app = App::new();
+        assert!(app.pending_share_id().is_none());
+    }
+
+    #[test]
+    fn test_app_stop_all_shares_clears_state() {
+        let mut app = App::new();
+
+        // Set some state
+        app.set_sharing_active("https://test.com".into(), "ngrok".into());
+        let id = ShareId::new();
+        app.set_pending_share(id, PathBuf::from("/test.jsonl"), "ngrok".into());
+
+        // Stop all shares
+        app.stop_all_shares();
+
+        // Verify state is cleared
+        assert!(!app.sharing_state().is_active());
+        assert!(app.pending_share_id().is_none());
+        assert!(!app.share_manager().has_active_shares());
+    }
+
+    #[test]
+    fn test_app_clear_sharing_state_clears_pending() {
+        let mut app = App::new();
+
+        let id = ShareId::new();
+        app.set_pending_share(id, PathBuf::from("/test.jsonl"), "cloudflare".into());
+        app.set_sharing_active("https://test.com".into(), "cloudflare".into());
+
+        app.clear_sharing_state();
+
+        // Pending share should be cleared
+        assert!(app.pending_share_id().is_none());
+        // Sharing state should be inactive
+        assert!(!app.sharing_state().is_active());
+    }
+
+    #[test]
+    fn test_app_share_manager_mut_allows_modification() {
+        let mut app = App::new();
+
+        // Mark a share as started
+        let id = ShareId::new();
+        app.share_manager_mut().mark_started(
+            id,
+            PathBuf::from("/test.jsonl"),
+            "https://test.com".into(),
+            "cloudflare".into(),
+        );
+
+        assert_eq!(app.active_share_count(), 1);
+        assert!(app.share_manager().has_active_shares());
+    }
+
+    #[test]
+    fn test_app_max_shares_default() {
+        let app = App::new();
+        assert_eq!(app.max_shares(), DEFAULT_MAX_SHARES);
+    }
+
+    #[test]
+    fn test_app_set_max_shares() {
+        let mut app = App::new();
+        app.set_max_shares(10);
+        assert_eq!(app.max_shares(), 10);
+    }
+
+    #[test]
+    fn test_app_can_add_share_respects_max() {
+        let mut app = App::new();
+        app.set_max_shares(2);
+
+        // Initially can add
+        assert!(app.can_add_share());
+
+        // Add first share
+        let id1 = ShareId::new();
+        app.share_manager_mut().mark_started(
+            id1,
+            PathBuf::from("/a.jsonl"),
+            "https://a.com".into(),
+            "ngrok".into(),
+        );
+        assert!(app.can_add_share()); // Can still add
+
+        // Add second share
+        let id2 = ShareId::new();
+        app.share_manager_mut().mark_started(
+            id2,
+            PathBuf::from("/b.jsonl"),
+            "https://b.com".into(),
+            "cloudflare".into(),
+        );
+        assert!(!app.can_add_share()); // At max, can't add more
+    }
+
+    // Share modal tests
+
+    #[test]
+    fn test_share_modal_initially_not_showing() {
+        let app = App::new();
+        assert!(!app.is_share_modal_showing());
+        assert!(app.share_modal_url().is_none());
+    }
+
+    #[test]
+    fn test_show_share_modal() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test_session".to_string(),
+            "https://example.trycloudflare.com".to_string(),
+            "cloudflare".to_string(),
+        );
+
+        assert!(app.is_share_modal_showing());
+        assert_eq!(
+            app.share_modal_url(),
+            Some("https://example.trycloudflare.com")
+        );
+    }
+
+    #[test]
+    fn test_dismiss_share_modal() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+        assert!(app.is_share_modal_showing());
+
+        app.dismiss_share_modal();
+        assert!(!app.is_share_modal_showing());
+        assert!(app.share_modal_url().is_none());
+    }
+
+    #[test]
+    fn test_share_modal_should_dismiss_false_initially() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Just shown, should not dismiss yet
+        assert!(!app.share_modal_should_dismiss());
+    }
+
+    #[test]
+    fn test_share_modal_key_c_triggers_copy_url() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press 'c' to copy URL
+        app.handle_key_event(key_event(KeyCode::Char('c'))).unwrap();
+
+        // Modal should still be showing (copy doesn't close)
+        assert!(app.is_share_modal_showing());
+        // Should have pending action to copy URL
+        assert!(matches!(app.pending_action(), &Action::CopyShareUrl(_)));
+    }
+
+    #[test]
+    fn test_share_modal_key_enter_closes() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press Enter to close
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_share_modal_key_esc_closes() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press Esc to close
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_share_modal_any_other_key_closes() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Press any other key to close
+        app.handle_key_event(key_event(KeyCode::Char('x'))).unwrap();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_tick_dismisses_expired_modal() {
+        use std::time::Duration;
+
+        let mut app = App::new();
+        // Show modal with 0 second timeout (immediately expired)
+        app.share_modal_state = Some(
+            ShareModalState::new(
+                "test".to_string(),
+                "https://example.com".to_string(),
+                "ngrok".to_string(),
+            )
+            .with_timeout(Duration::from_secs(0)),
+        );
+
+        assert!(app.is_share_modal_showing());
+        assert!(app.share_modal_should_dismiss());
+
+        // Tick should dismiss it
+        app.tick();
+        assert!(!app.is_share_modal_showing());
+    }
+
+    #[test]
+    fn test_tick_does_not_dismiss_non_expired_modal() {
+        let mut app = App::new();
+        app.show_share_modal(
+            "test".to_string(),
+            "https://example.com".to_string(),
+            "ngrok".to_string(),
+        );
+
+        // Tick should not dismiss (modal just shown, hasn't timed out)
+        app.tick();
+        assert!(app.is_share_modal_showing());
+    }
+
+    // Shares panel tests
+
+    #[test]
+    fn test_shares_panel_initially_not_showing() {
+        let app = App::new();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_toggle_shares_panel_on() {
+        let mut app = App::new();
+        assert!(!app.is_shares_panel_showing());
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_toggle_shares_panel_off() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+        app.toggle_shares_panel();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_handle_key_shift_s_toggles_shares_panel() {
+        let mut app = App::new();
+        assert!(!app.is_shares_panel_showing());
+
+        // Open panel
+        app.handle_key_event(key_event(KeyCode::Char('S'))).unwrap();
+        assert!(app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_shares_panel_esc_closes() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_shares_panel_shift_s_closes() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event(KeyCode::Char('S'))).unwrap();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_shares_panel_q_closes_and_quits() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event(KeyCode::Char('q'))).unwrap();
+        assert!(!app.is_shares_panel_showing());
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn test_shares_panel_navigation_j_k() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+
+        // Without shares, navigation should not crash
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('k'))).unwrap();
+        // Should still be showing and running
+        assert!(app.is_shares_panel_showing());
+        assert!(app.is_running());
+    }
+
+    #[test]
+    fn test_shares_panel_enter_with_no_shares_does_nothing() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+
+        // Enter on empty panel shouldn't create action
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.pending_action(), Action::None));
+    }
+
+    #[test]
+    fn test_shares_panel_d_with_no_shares_does_nothing() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+
+        // d on empty panel shouldn't create action
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(matches!(app.pending_action(), Action::None));
+    }
+
+    #[test]
+    fn test_selected_active_share_none_when_empty() {
+        let app = App::new();
+        assert!(app.selected_active_share().is_none());
+    }
+
+    #[test]
+    fn test_shares_panel_ctrl_c_closes_and_quits() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event_with_modifiers(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))
+        .unwrap();
+        assert!(!app.is_shares_panel_showing());
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn test_shares_panel_intercepts_normal_keys() {
+        let mut app = App::with_sessions(sample_sessions());
+        let initial_selected = app.session_list_state.selected();
+
+        // Open shares panel
+        app.toggle_shares_panel();
+
+        // Navigation keys should be intercepted by shares panel, not session list
+        app.handle_key_event(key_event(KeyCode::Down)).unwrap();
+        assert_eq!(app.session_list_state.selected(), initial_selected);
+
+        // j/k should also be intercepted
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        assert_eq!(app.session_list_state.selected(), initial_selected);
     }
 }

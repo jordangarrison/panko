@@ -1,4 +1,4 @@
-# Agent Replay - Milestone 2 Progress
+# Panko - Milestone 2 Progress
 
 ## Overview
 

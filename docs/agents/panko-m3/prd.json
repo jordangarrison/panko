@@ -8,7 +8,7 @@
       "title": "Fix branding (Agent Replay → Panko)",
       "description": "Update all references from 'Agent Replay' to 'Panko' throughout the codebase",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Update templates/session.html title and header",
         "Update src/tui/app.rs TUI titles",
@@ -26,7 +26,7 @@
       "title": "Fix tool output rendering in web UI",
       "description": "Improve tool call rendering so inputs/outputs are readable, not compressed single-line JSON",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Tool inputs display as formatted, syntax-highlighted JSON (not minified)",
         "Long tool outputs wrap properly with horizontal scroll only when needed",
@@ -42,7 +42,7 @@
       "title": "Copy context to clipboard (TUI)",
       "description": "Allow copying entire session context to clipboard for reuse in a new Claude Code session",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Shift+C on selected session triggers copy context",
         "Formats session as markdown: user prompts, assistant responses, key tool results",
@@ -58,7 +58,7 @@
       "title": "Download session file",
       "description": "Add download button/action in web UI to download the raw JSONL session file",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Download button visible in web UI header",
         "Downloads original JSONL file with proper filename: {session_id}.jsonl",
@@ -73,7 +73,7 @@
       "title": "Parse Task tool for sub-agent tracking",
       "description": "Extend parser to recognize Task tool calls and track sub-agent spawning",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "New Block::SubAgentSpawn variant with: agent_id, agent_type, prompt, status",
         "ClaudeParser detects Task tool calls and extracts sub-agent info",
@@ -89,7 +89,7 @@
       "title": "Sub-agent flow visualization (web UI)",
       "description": "Display sub-agent spawns and their outputs in a threaded/nested view",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Sub-agent blocks visually indented or in collapsible section",
         "Shows agent type badge (Explore, Plan, Bash, etc.)",
@@ -104,7 +104,7 @@
       "title": "Refactor sharing state for multiple shares",
       "description": "Refactor single SharingState to support multiple concurrent shares",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "New ActiveShare struct: id, session_path, public_url, provider_name, started_at",
         "App.active_shares: Vec<ActiveShare> replaces single state",
@@ -121,7 +121,7 @@
       "title": "Share started modal with URL",
       "description": "Modal popup showing public URL when share starts",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Modal appears on SharingMessage::Started",
         "Shows: session name, public URL (bold/colored), provider",
@@ -137,7 +137,7 @@
       "title": "Shares panel widget",
       "description": "Panel showing all active shares with controls",
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Shift+S toggles shares panel",
         "Lists: session name, URL, provider, duration",
@@ -152,7 +152,7 @@
       "title": "Concurrent share management",
       "description": "Start multiple shares simultaneously",
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "'s' starts NEW share (doesn't replace)",
         "Each share in own background thread",
@@ -167,7 +167,7 @@
       "title": "Open draft PR for M3",
       "description": "Create draft PR for feature/multi-share branch",
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "All stories 1-10 pass",
         "Branch pushed to remote",
@@ -175,6 +175,39 @@
         "PR includes feature summary and test plan"
       ],
       "depends_on": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+    },
+    {
+      "id": "12",
+      "title": "Add structured logging and diagnostics for sharing",
+      "description": "Add tracing-based logging infrastructure for sharing operations. Logs capture all phases (parsing, server start, tunnel spawn, URL detection) with timing. Support configurable log file output since TUI uses stdout/stderr.",
+      "priority": 12,
+      "passes": true,
+      "acceptance_criteria": [
+        "Add `tracing` and `tracing-subscriber` with file appender to Cargo.toml",
+        "Add `log_file` option to Config struct (~/.config/panko/config.toml)",
+        "Add phase logging in sharing_thread(): runtime creation, session parsing, config loading, server start, tunnel spawn, URL received",
+        "Capture and log tunnel subprocess stderr output instead of discarding",
+        "Add timing spans measuring each sharing phase duration",
+        "Add `--verbose` / `-v` CLI flag that increases log verbosity"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "13",
+      "title": "Create MockTunnelProvider and E2E testing for multi-share",
+      "description": "Implement MockTunnelProvider that returns predictable URLs without subprocesses. Add E2E tests validating full sharing flow including concurrent shares, unique IDs, limit enforcement, and graceful shutdown.",
+      "priority": 13,
+      "passes": true,
+      "acceptance_criteria": [
+        "Create MockTunnelProvider implementing TunnelProvider trait (returns configurable URLs instantly)",
+        "MockTunnelProvider can simulate startup delay and errors for testing",
+        "Add #[cfg(test)] injection point to use mock provider in tests",
+        "Create tests/sharing_e2e.rs with test starting share via MockTunnelProvider",
+        "Add test: start 3 concurrent shares, verify unique ShareIds and all URLs work",
+        "Add test: exceed max_shares limit, verify proper rejection",
+        "Add test: graceful shutdown with active shares, verify all stopped cleanly"
+      ],
+      "depends_on": []
     }
   ]
 }

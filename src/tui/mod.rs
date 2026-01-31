@@ -11,9 +11,14 @@ pub mod watcher;
 pub mod widgets;
 
 pub use actions::Action;
-pub use app::{App, AppResult, FocusedPanel, RefreshState, SharingState, MIN_HEIGHT, MIN_WIDTH};
+pub use app::{
+    App, AppResult, FocusedPanel, RefreshState, SharingState, DEFAULT_MAX_SHARES, MIN_HEIGHT,
+    MIN_WIDTH,
+};
 pub use events::{Event, EventHandler};
-pub use sharing::{SharingCommand, SharingHandle, SharingMessage};
+pub use sharing::{
+    ActiveShare, ShareId, ShareManager, ShareMessage, SharingCommand, SharingHandle, SharingMessage,
+};
 pub use watcher::{FileWatcher, WatcherMessage};
 pub use widgets::{ProviderOption, SessionList, SessionListState, SortOrder, TreeItem};
 
@@ -108,7 +113,14 @@ pub fn run_with_watcher(
 
         // Handle events
         match event_handler.next()? {
-            Event::Tick => app.tick(),
+            Event::Tick => {
+                app.tick();
+                // Process share messages inline to avoid terminal cycling
+                // This prevents screen flickering when shares are active
+                if app.has_pending_share() || app.share_manager().has_active_shares() {
+                    app.process_share_messages();
+                }
+            }
             Event::Key(key_event) => app.handle_key_event(key_event)?,
             Event::Resize(width, height) => app.handle_resize(width, height),
         }

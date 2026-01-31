@@ -44,11 +44,13 @@ pub fn get_shortcut_categories() -> Vec<ShortcutCategory> {
             shortcuts: vec![
                 ("v / Enter", "View session"),
                 ("s", "Share session"),
+                ("S", "Show active shares"),
                 ("c", "Copy session path"),
+                ("C", "Copy context to clipboard"),
+                ("D", "Download to ~/Downloads"),
                 ("o", "Open folder"),
                 ("d", "Delete session"),
                 ("r", "Refresh list"),
-                ("S", "Cycle sort order"),
             ],
         },
         ShortcutCategory {

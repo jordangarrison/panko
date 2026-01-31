@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ session.project | default(value=session.id) }} - Agent Replay</title>
+    <title>{{ session.project | default(value=session.id) }} - Panko</title>
     <link rel="stylesheet" href="/assets/styles.css">
     <script src="/assets/htmx.min.js" defer></script>
     <script src="/assets/keyboard.js" defer></script>
 </head>
 <body>
     <header class="session-header">
-        <h1>Agent Replay</h1>
+        <h1>Panko</h1>
         <div class="session-info">
             <span class="session-id">{{ session.id }}</span>
             {% if session.project %}
@@ -18,7 +18,11 @@
             {% endif %}
             <time datetime="{{ session.started_at }}">{{ session.started_at }}</time>
         </div>
-        <button class="help-hint" aria-label="Show keyboard shortcuts" title="Press ? for keyboard shortcuts">?</button>
+        <div class="header-actions">
+            <button class="copy-all-btn" aria-label="Copy entire session as text" title="Copy session as text (c)">📋 Copy All</button>
+            <a href="/download" class="download-btn" aria-label="Download session file" title="Download session JSONL file">⬇ Download</a>
+            <button class="help-hint" aria-label="Show keyboard shortcuts" title="Press ? for keyboard shortcuts">?</button>
+        </div>
     </header>
 
     <main class="session-content">
@@ -57,19 +61,35 @@
         </article>
 
         {% elif block.type == "tool_call" %}
-        <article class="block block-tool" data-type="tool_call" tabindex="0">
+        <article class="block block-tool" data-type="tool_call" data-tool-name="{{ block.name }}" tabindex="0">
             <div class="block-header">
                 <span class="block-label">Tool: {{ block.name }}</span>
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
             </div>
-            <details class="tool-details">
-                <summary>Input</summary>
-                <pre class="tool-input"><code>{{ block.input | tojson(indent=2) }}</code></pre>
+            {% set important_tool = block.name in ["Write", "Edit", "Bash", "Read", "NotebookEdit"] %}
+            <details class="tool-details"{% if important_tool %} open{% endif %}>
+                <summary>
+                    <span class="summary-text">Input</span>
+                    <button type="button" class="copy-btn" data-copy-target="input" title="Copy to clipboard">Copy</button>
+                </summary>
+                <div class="tool-code-wrapper">
+                    <pre class="tool-input json-code"><code>{{ block.input | tojson(indent=2) }}</code></pre>
+                </div>
             </details>
             {% if block.output %}
-            <details class="tool-details">
-                <summary>Output</summary>
-                <pre class="tool-output"><code>{{ block.output | tojson(indent=2) }}</code></pre>
+            {% set is_large_output = block.output_lines and block.output_lines > 100 %}
+            <details class="tool-details"{% if important_tool and not is_large_output %} open{% endif %}>
+                <summary>
+                    <span class="summary-text">Output{% if is_large_output %} ({{ block.output_lines }} lines){% endif %}</span>
+                    <button type="button" class="copy-btn" data-copy-target="output" title="Copy to clipboard">Copy</button>
+                </summary>
+                <div class="tool-code-wrapper{% if is_large_output %} large-output collapsed{% endif %}"{% if block.output_lines %} data-full-lines="{{ block.output_lines }}"{% endif %}>
+                    <pre class="tool-output json-code"><code>{{ block.output | tojson(indent=2) }}</code></pre>
+                    {% if is_large_output %}
+                    <div class="output-fade"></div>
+                    <button type="button" class="show-full-btn">Show full output</button>
+                    {% endif %}
+                </div>
             </details>
             {% endif %}
         </article>
@@ -81,6 +101,43 @@
                 <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
             </div>
             <pre class="diff"><code>{{ block.diff }}</code></pre>
+        </article>
+
+        {% elif block.type == "sub_agent_spawn" %}
+        <article class="block block-sub-agent" data-type="sub_agent_spawn" data-agent-status="{{ block.agent_status }}" tabindex="0">
+            <div class="block-header">
+                <span class="block-label">
+                    <span class="agent-badge agent-badge-{{ block.agent_type | lower | replace(" ", "-") }}">{{ block.agent_type }}</span>
+                    Sub-Agent
+                </span>
+                <span class="agent-status agent-status-{{ block.agent_status }}">{{ block.agent_status }}</span>
+                <time datetime="{{ block.timestamp }}">{{ block.timestamp }}</time>
+            </div>
+            <div class="sub-agent-content">
+                <div class="sub-agent-connector"></div>
+                <div class="sub-agent-body">
+                    <div class="sub-agent-description">{{ block.description }}</div>
+                    <details class="sub-agent-details">
+                        <summary>
+                            <span class="summary-text">Full Prompt</span>
+                        </summary>
+                        <div class="sub-agent-prompt">
+                            {{ block.content_html | safe }}
+                        </div>
+                    </details>
+                    {% if block.agent_result %}
+                    <details class="sub-agent-details" open>
+                        <summary>
+                            <span class="summary-text">Result</span>
+                            <button type="button" class="copy-btn" data-copy-target="result" title="Copy to clipboard">Copy</button>
+                        </summary>
+                        <div class="sub-agent-result{% if block.agent_status == 'failed' %} sub-agent-result-error{% endif %}">
+                            <pre><code>{{ block.agent_result }}</code></pre>
+                        </div>
+                    </details>
+                    {% endif %}
+                </div>
+            </div>
         </article>
         {% endif %}
         {% endfor %}
@@ -111,6 +168,10 @@
                 <div class="shortcut-group">
                     <dt><kbd>G</kbd></dt>
                     <dd>Go to last block</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>c</kbd></dt>
+                    <dd>Copy entire session</dd>
                 </div>
                 <div class="shortcut-group">
                     <dt><kbd>?</kbd></dt>

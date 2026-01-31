@@ -11,6 +11,9 @@ pub enum Action {
     /// View a session in the web browser.
     /// The path is the session file to view.
     ViewSession(PathBuf),
+    /// Copy session context to clipboard for reuse.
+    /// The path is the session file to export context from.
+    CopyContext(PathBuf),
     /// Share a session via a public tunnel.
     /// This triggers provider detection and selection.
     ShareSession(PathBuf),
@@ -38,6 +41,12 @@ pub enum Action {
     OpenFolder(PathBuf),
     /// Delete a session file.
     DeleteSession(PathBuf),
+    /// Download a session file to ~/Downloads.
+    DownloadSession(PathBuf),
+    /// Copy a URL to clipboard (used by share modal).
+    CopyShareUrl(String),
+    /// Stop a specific share by its ID.
+    StopShareById(crate::tui::sharing::ShareId),
     /// No action to perform.
     #[default]
     None,
@@ -147,6 +156,47 @@ mod tests {
         match action {
             Action::DeleteSession(p) => assert_eq!(p, path),
             _ => panic!("Expected DeleteSession"),
+        }
+    }
+
+    #[test]
+    fn test_action_copy_context() {
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let action = Action::CopyContext(path.clone());
+        match action {
+            Action::CopyContext(p) => assert_eq!(p, path),
+            _ => panic!("Expected CopyContext"),
+        }
+    }
+
+    #[test]
+    fn test_action_download_session() {
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let action = Action::DownloadSession(path.clone());
+        match action {
+            Action::DownloadSession(p) => assert_eq!(p, path),
+            _ => panic!("Expected DownloadSession"),
+        }
+    }
+
+    #[test]
+    fn test_action_copy_share_url() {
+        let url = "https://example.trycloudflare.com".to_string();
+        let action = Action::CopyShareUrl(url.clone());
+        match action {
+            Action::CopyShareUrl(u) => assert_eq!(u, url),
+            _ => panic!("Expected CopyShareUrl"),
+        }
+    }
+
+    #[test]
+    fn test_action_stop_share_by_id() {
+        use crate::tui::sharing::ShareId;
+        let id = ShareId::new();
+        let action = Action::StopShareById(id);
+        match action {
+            Action::StopShareById(i) => assert_eq!(i, id),
+            _ => panic!("Expected StopShareById"),
         }
     }
 }
