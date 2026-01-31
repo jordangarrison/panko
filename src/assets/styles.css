@@ -409,12 +409,42 @@ code {
     box-shadow: 0 0 12px rgba(74, 158, 255, 0.3);
 }
 
-/* Help hint button in header */
-.help-hint {
+/* Header actions container */
+.header-actions {
     position: absolute;
     right: 1rem;
     top: 50%;
     transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Download button in header */
+.download-btn {
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: all 0.2s ease;
+}
+
+.download-btn:hover {
+    border-color: var(--accent-user);
+    color: var(--accent-user);
+    background: var(--bg-secondary);
+}
+
+/* Help hint button in header */
+.help-hint {
     width: 28px;
     height: 28px;
     border-radius: 50%;

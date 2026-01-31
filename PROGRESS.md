@@ -1,5 +1,82 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 4: Download session file
+
+### Summary
+Implemented the ability to download session JSONL files from both the web UI and the TUI. Users can click a "Download" button in the web viewer header or press Shift+D in the TUI to save the session file to ~/Downloads.
+
+### Changes
+- Updated `src/tui/actions.rs`:
+  - Added `DownloadSession(PathBuf)` variant to `Action` enum
+  - Added unit test for new action variant
+
+- Updated `src/tui/app.rs`:
+  - Added `KeyCode::Char('D')` handler for Shift+D
+  - Triggers `DownloadSession` action with selected session path
+  - 4 new unit tests for download keybinding
+
+- Updated `src/tui/widgets/help.rs`:
+  - Added "D - Download to ~/Downloads" to Actions section
+
+- Updated `src/server/routes.rs`:
+  - Added `source_path: Option<PathBuf>` to `AppState` struct
+  - Added `/download` route to router
+  - Added `download_handler` that serves the original JSONL file
+  - Sets `Content-Type: application/jsonl` and `Content-Disposition: attachment`
+  - 2 new unit tests for download endpoint
+
+- Updated `src/server/mod.rs`:
+  - Added `run_server_with_source()` function for servers with source path
+  - Added `start_server_with_source()` function for servers with source path
+  - Original `run_server()` and `start_server()` delegate to new functions
+
+- Updated `src/main.rs`:
+  - Updated imports to use `*_with_source` variants
+  - Updated view command to pass source file path to server
+  - Updated share command to pass source file path to server
+  - Updated `handle_view_from_tui()` to pass source file path
+  - Added handler for `DownloadSession` action in `handle_tui_action()`
+  - Added `handle_download_session()` helper function that copies to ~/Downloads
+
+- Updated `templates/session.html`:
+  - Added `.header-actions` container in header
+  - Added download button with link to `/download`
+
+- Updated `src/assets/styles.css`:
+  - Added `.header-actions` container styles
+  - Added `.download-btn` button styles with hover state
+
+### Test Coverage (7 new tests)
+Download action tests:
+- `test_action_download_session` - action variant creation
+
+App keybinding tests:
+- `test_handle_key_shift_d_triggers_download_on_session`
+- `test_handle_key_shift_d_does_nothing_on_project`
+- `test_handle_key_shift_d_does_nothing_when_empty`
+- `test_download_works_regardless_of_focus`
+
+Server route tests:
+- `test_download_handler_no_source_path` - returns 404 without source
+- `test_download_handler_with_source_path` - returns file with proper headers
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (450 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Download button visible in web UI header
+- [x] Downloads original JSONL file with proper filename: {session_id}.jsonl
+- [x] Add download action in TUI: Shift+D to save copy to ~/Downloads
+- [x] Confirmation shows file path: 'Saved to ~/Downloads/abc123.jsonl'
+- [x] Works for shared sessions (download from public URL)
+
+---
+
 ## 2026-01-30 - M3 Story 3: Copy context to clipboard (TUI)
 
 ### Summary

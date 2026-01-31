@@ -52,6 +52,23 @@ impl Default for ServerConfig {
 ///
 /// Returns the server address on success.
 pub async fn run_server(session: Session, config: ServerConfig) -> anyhow::Result<()> {
+    run_server_with_source(session, config, None).await
+}
+
+/// Run the web server with the given session and optional source file path.
+///
+/// This function will:
+/// 1. Find an available port starting from `config.base_port`
+/// 2. Start the axum server
+/// 3. Optionally open the browser
+/// 4. Wait for Ctrl+C to gracefully shut down
+///
+/// Returns the server address on success.
+pub async fn run_server_with_source(
+    session: Session,
+    config: ServerConfig,
+    source_path: Option<std::path::PathBuf>,
+) -> anyhow::Result<()> {
     let port = find_available_port(config.base_port)
         .ok_or_else(|| anyhow::anyhow!("No available port found"))?;
 
@@ -61,6 +78,7 @@ pub async fn run_server(session: Session, config: ServerConfig) -> anyhow::Resul
     let state = Arc::new(AppState {
         session,
         template_engine: TemplateEngine::default(),
+        source_path,
     });
 
     let app = build_router(state);
@@ -147,6 +165,17 @@ impl ServerHandle {
 ///
 /// Returns a ServerHandle that can be used to get the URL and stop the server.
 pub async fn start_server(session: Session, config: ServerConfig) -> anyhow::Result<ServerHandle> {
+    start_server_with_source(session, config, None).await
+}
+
+/// Start a server with optional source path that can be controlled externally.
+///
+/// Returns a ServerHandle that can be used to get the URL and stop the server.
+pub async fn start_server_with_source(
+    session: Session,
+    config: ServerConfig,
+    source_path: Option<std::path::PathBuf>,
+) -> anyhow::Result<ServerHandle> {
     let port = find_available_port(config.base_port)
         .ok_or_else(|| anyhow::anyhow!("No available port found"))?;
 
@@ -156,6 +185,7 @@ pub async fn start_server(session: Session, config: ServerConfig) -> anyhow::Res
     let state = Arc::new(AppState {
         session,
         template_engine: TemplateEngine::default(),
+        source_path,
     });
 
     let app = build_router(state);

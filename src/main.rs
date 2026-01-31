@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use panko::config::{format_config, Config};
 use panko::export::{format_context, ContextOptions};
 use panko::parser::{ClaudeParser, SessionParser};
-use panko::server::{run_server, shutdown_signal, start_server, ServerConfig};
+use panko::server::{
+    run_server_with_source, shutdown_signal, start_server_with_source, ServerConfig,
+};
 use panko::tui;
 use panko::tunnel::{detect_available_providers, get_provider_with_config, AvailableProvider};
 
@@ -222,7 +224,7 @@ async fn main() -> Result<()> {
                 open_browser: !no_browser,
             };
 
-            run_server(session, server_config).await?;
+            run_server_with_source(session, server_config, Some(file)).await?;
         }
         Commands::Share { file, tunnel, port } => {
             // Load configuration
@@ -326,7 +328,8 @@ async fn main() -> Result<()> {
                 open_browser: false,
             };
 
-            let server_handle = start_server(session, server_config).await?;
+            let server_handle =
+                start_server_with_source(session, server_config, Some(file.clone())).await?;
             let actual_port = server_handle.port();
 
             println!("Local server running at: {}", server_handle.local_url());
@@ -611,6 +614,17 @@ fn handle_tui_action(
                 }
             }
         }
+        tui::Action::DownloadSession(path) => {
+            // Download the session file to ~/Downloads
+            match handle_download_session(path) {
+                Ok(dest_path) => {
+                    app.set_status_message(format!("✓ Saved to {}", dest_path.display()));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Download failed: {}", e));
+                }
+            }
+        }
         tui::Action::None => {
             // Nothing to do
         }
@@ -659,9 +673,11 @@ fn handle_view_from_tui(path: &Path) -> Result<()> {
 
     // Run the server using the current runtime (we're already inside #[tokio::main])
     // Use block_in_place to run async code from synchronous context within runtime
+    let source_path = path.to_path_buf();
     tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current().block_on(async {
-            if let Err(e) = run_server(session, server_config).await {
+            if let Err(e) = run_server_with_source(session, server_config, Some(source_path)).await
+            {
                 eprintln!("Server error: {}", e);
             }
         })
@@ -699,6 +715,29 @@ fn handle_copy_context(path: &Path) -> Result<(usize, usize)> {
     copy_to_clipboard(&context.content)?;
 
     Ok((context.message_count, context.estimated_tokens))
+}
+
+/// Handle downloading a session file to ~/Downloads.
+///
+/// Copies the session JSONL file to the user's Downloads directory
+/// with the filename format: {session_id}.jsonl
+fn handle_download_session(path: &Path) -> Result<PathBuf> {
+    // Get the Downloads directory
+    let downloads_dir = dirs::download_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find Downloads directory"))?;
+
+    // Get the filename from the source path
+    let filename = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid source path"))?;
+
+    // Create the destination path
+    let dest_path = downloads_dir.join(filename);
+
+    // Copy the file
+    std::fs::copy(path, &dest_path).context("Failed to copy session file")?;
+
+    Ok(dest_path)
 }
 
 /// Handle config subcommand

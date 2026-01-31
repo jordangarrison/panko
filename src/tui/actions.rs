@@ -41,6 +41,8 @@ pub enum Action {
     OpenFolder(PathBuf),
     /// Delete a session file.
     DeleteSession(PathBuf),
+    /// Download a session file to ~/Downloads.
+    DownloadSession(PathBuf),
     /// No action to perform.
     #[default]
     None,
@@ -160,6 +162,16 @@ mod tests {
         match action {
             Action::CopyContext(p) => assert_eq!(p, path),
             _ => panic!("Expected CopyContext"),
+        }
+    }
+
+    #[test]
+    fn test_action_download_session() {
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let action = Action::DownloadSession(path.clone());
+        match action {
+            Action::DownloadSession(p) => assert_eq!(p, path),
+            _ => panic!("Expected DownloadSession"),
         }
     }
 }

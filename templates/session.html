@@ -18,7 +18,10 @@
             {% endif %}
             <time datetime="{{ session.started_at }}">{{ session.started_at }}</time>
         </div>
-        <button class="help-hint" aria-label="Show keyboard shortcuts" title="Press ? for keyboard shortcuts">?</button>
+        <div class="header-actions">
+            <a href="/download" class="download-btn" aria-label="Download session file" title="Download session JSONL file">⬇ Download</a>
+            <button class="help-hint" aria-label="Show keyboard shortcuts" title="Press ? for keyboard shortcuts">?</button>
+        </div>
     </header>
 
     <main class="session-content">

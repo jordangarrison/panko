@@ -397,6 +397,12 @@ impl App {
                     self.pending_action = Action::CopyContext(session.path.clone());
                 }
             }
+            // Download: D (shift+d) to download session to ~/Downloads
+            KeyCode::Char('D') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::DownloadSession(session.path.clone());
+                }
+            }
             // Delete: d to delete selected session (with confirmation)
             KeyCode::Char('d') => {
                 // Cannot delete while sharing is active
@@ -1930,6 +1936,59 @@ mod tests {
         app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
         assert!(app.has_pending_action());
         assert!(matches!(app.pending_action(), Action::CopyContext(_)));
+    }
+
+    // Tests for Shift+D download action
+
+    #[test]
+    fn test_handle_key_shift_d_triggers_download_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Select the first session (not a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'D' (Shift+D)
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+
+        // Should have a pending download action
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::DownloadSession(_)));
+    }
+
+    #[test]
+    fn test_handle_key_shift_d_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Don't select - starts on a project header
+
+        // Press 'D' (Shift+D)
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+
+        // Should not have a pending action (selected item is project, not session)
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_shift_d_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'D' (Shift+D) with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_download_works_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Press 'D' (Shift+D) - should still work since we have a selected session
+        app.handle_key_event(key_event(KeyCode::Char('D'))).unwrap();
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::DownloadSession(_)));
     }
 
     // Tests for fuzzy search

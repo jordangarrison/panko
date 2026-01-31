@@ -58,7 +58,7 @@
       "title": "Download session file",
       "description": "Add download button/action in web UI to download the raw JSONL session file",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Download button visible in web UI header",
         "Downloads original JSONL file with proper filename: {session_id}.jsonl",
