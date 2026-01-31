@@ -73,7 +73,7 @@
       "title": "Parse Task tool for sub-agent tracking",
       "description": "Extend parser to recognize Task tool calls and track sub-agent spawning",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "New Block::SubAgentSpawn variant with: agent_id, agent_type, prompt, status",
         "ClaudeParser detects Task tool calls and extracts sub-agent info",

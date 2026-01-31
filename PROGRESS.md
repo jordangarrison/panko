@@ -1,5 +1,80 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 5: Parse Task tool for sub-agent tracking
+
+### Summary
+Extended the parser to recognize Task tool calls and track sub-agent spawning. When the Claude Code assistant spawns sub-agents using the Task tool, they are now tracked with metadata including type, prompt, status, and completion results.
+
+### Changes
+- Updated `src/parser/types.rs`:
+  - Added `SubAgentMeta` struct with: id, agent_type, description, prompt, status, spawned_at, completed_at, result
+  - Added `SubAgentStatus` enum with: Running, Completed, Failed
+  - Added `Block::SubAgentSpawn` variant with: agent_id, agent_type, description, prompt, status, timestamp
+  - Added `sub_agents: Vec<SubAgentMeta>` field to `Session` struct (default empty, omitted in JSON when empty)
+  - Added `SubAgentMeta::new()`, `complete()`, and `fail()` methods
+  - Added `Block::sub_agent_spawn()` helper constructor
+  - Updated `Block::timestamp()` to handle SubAgentSpawn
+  - 7 new unit tests for SubAgentSpawn and SubAgentMeta serialization
+
+- Updated `src/parser/claude.rs`:
+  - Added `pending_sub_agents: HashMap<String, usize>` to track spawned agents awaiting results
+  - Added `sub_agents: Vec<SubAgentMeta>` to accumulate agent metadata
+  - Modified `process_assistant_message()` to detect Task tool calls and create SubAgentSpawn blocks
+  - Added `extract_sub_agent_spawn()` helper function
+  - Added `is_error` field to `ContentBlock` for detecting failed tool results
+  - Tool result processing now checks for sub-agent completion and updates status
+  - Session sub_agents field is populated at the end of parsing
+  - 11 new unit tests for sub-agent parsing
+
+- Updated `src/parser/mod.rs`:
+  - Added exports for `SubAgentMeta` and `SubAgentStatus`
+
+- Updated `src/server/templates.rs`:
+  - Added `agent_id`, `agent_type`, `description`, `prompt`, `agent_status` fields to `BlockView`
+  - Added match arm for `Block::SubAgentSpawn` in `from_block()`
+
+- Created `tests/fixtures/session_with_subagents.jsonl`:
+  - Test fixture with multiple Task tool calls (Explore, Plan, general-purpose)
+  - Includes successful completions and error cases
+
+### Test Coverage (18 new tests)
+Type tests in `src/parser/types.rs`:
+- `test_block_serialization_sub_agent_spawn` - serialization roundtrip
+- `test_sub_agent_status_serialization` - status enum serialization
+- `test_sub_agent_meta_serialization` - meta struct serialization
+- `test_session_with_sub_agents` - session with agents roundtrip
+- `test_session_without_sub_agents_omits_field` - empty agents omitted
+- `test_block_timestamp_sub_agent_spawn` - timestamp accessor
+
+Parser tests in `src/parser/claude.rs`:
+- `test_parse_task_tool_creates_sub_agent_spawn_block` - basic Task parsing
+- `test_parse_task_tool_with_result_completes_sub_agent` - completion tracking
+- `test_parse_task_tool_with_error_fails_sub_agent` - error handling
+- `test_parse_multiple_sub_agents` - multiple agents in one session
+- `test_parse_sub_agent_without_result_stays_running` - pending agents
+- `test_backwards_compatibility_old_sessions_still_parse` - backwards compat
+- `test_sub_agent_meta_new` - SubAgentMeta constructor
+- `test_sub_agent_meta_complete` - completion method
+- `test_sub_agent_meta_fail` - failure method
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (465 unit tests + 30 integration tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] New Block::SubAgentSpawn variant with: agent_id, agent_type, prompt, status
+- [x] ClaudeParser detects Task tool calls and extracts sub-agent info
+- [x] Track sub-agent completion via tool results
+- [x] Session gains sub_agents: Vec<SubAgentMeta> for tracking
+- [x] Unit tests with fixture containing Task tool calls
+- [x] Backwards compatible (old sessions still parse)
+
+---
+
 ## 2026-01-30 - M3 Story 4: Download session file
 
 ### Summary

@@ -10,7 +10,7 @@ mod types;
 
 pub use claude::ClaudeParser;
 pub use error::ParseError;
-pub use types::{Block, Session};
+pub use types::{Block, Session, SubAgentMeta, SubAgentStatus};
 
 use std::path::Path;
 

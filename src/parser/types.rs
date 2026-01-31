@@ -15,6 +15,43 @@ pub struct Session {
     pub started_at: DateTime<Utc>,
     /// The blocks of content in the session.
     pub blocks: Vec<Block>,
+    /// Sub-agents spawned during the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_agents: Vec<SubAgentMeta>,
+}
+
+/// Metadata about a sub-agent spawned during a session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubAgentMeta {
+    /// Unique identifier for the sub-agent (tool call ID).
+    pub id: String,
+    /// Type of sub-agent (e.g., "Explore", "Plan", "Bash", "general-purpose").
+    pub agent_type: String,
+    /// Short description of the task.
+    pub description: String,
+    /// The full prompt given to the sub-agent.
+    pub prompt: String,
+    /// Current status of the sub-agent.
+    pub status: SubAgentStatus,
+    /// When the sub-agent was spawned.
+    pub spawned_at: DateTime<Utc>,
+    /// When the sub-agent completed (if finished).
+    pub completed_at: Option<DateTime<Utc>>,
+    /// The result returned by the sub-agent (if completed).
+    pub result: Option<String>,
+}
+
+/// Status of a sub-agent.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SubAgentStatus {
+    /// Sub-agent is currently running.
+    #[default]
+    Running,
+    /// Sub-agent completed successfully.
+    Completed,
+    /// Sub-agent encountered an error.
+    Failed,
 }
 
 /// A single block of content within a session.
@@ -49,6 +86,20 @@ pub enum Block {
         diff: String,
         timestamp: DateTime<Utc>,
     },
+    /// A sub-agent spawn via the Task tool.
+    SubAgentSpawn {
+        /// Unique identifier for the sub-agent (tool call ID).
+        agent_id: String,
+        /// Type of sub-agent (e.g., "Explore", "Plan", "Bash").
+        agent_type: String,
+        /// Short description of the task.
+        description: String,
+        /// The full prompt given to the sub-agent.
+        prompt: String,
+        /// Current status of the sub-agent.
+        status: SubAgentStatus,
+        timestamp: DateTime<Utc>,
+    },
 }
 
 impl Session {
@@ -59,6 +110,7 @@ impl Session {
             project: None,
             started_at,
             blocks: Vec::new(),
+            sub_agents: Vec::new(),
         }
     }
 
@@ -83,6 +135,7 @@ impl Block {
             Block::ToolCall { timestamp, .. } => *timestamp,
             Block::Thinking { timestamp, .. } => *timestamp,
             Block::FileEdit { timestamp, .. } => *timestamp,
+            Block::SubAgentSpawn { timestamp, .. } => *timestamp,
         }
     }
 
@@ -136,6 +189,61 @@ impl Block {
             diff: diff.into(),
             timestamp,
         }
+    }
+
+    /// Create a new sub-agent spawn block.
+    pub fn sub_agent_spawn(
+        agent_id: impl Into<String>,
+        agent_type: impl Into<String>,
+        description: impl Into<String>,
+        prompt: impl Into<String>,
+        status: SubAgentStatus,
+        timestamp: DateTime<Utc>,
+    ) -> Self {
+        Block::SubAgentSpawn {
+            agent_id: agent_id.into(),
+            agent_type: agent_type.into(),
+            description: description.into(),
+            prompt: prompt.into(),
+            status,
+            timestamp,
+        }
+    }
+}
+
+impl SubAgentMeta {
+    /// Create a new sub-agent metadata entry.
+    pub fn new(
+        id: impl Into<String>,
+        agent_type: impl Into<String>,
+        description: impl Into<String>,
+        prompt: impl Into<String>,
+        spawned_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            agent_type: agent_type.into(),
+            description: description.into(),
+            prompt: prompt.into(),
+            status: SubAgentStatus::Running,
+            spawned_at,
+            completed_at: None,
+            result: None,
+        }
+    }
+
+    /// Mark the sub-agent as completed with a result.
+    pub fn complete(&mut self, result: impl Into<String>, completed_at: DateTime<Utc>) {
+        self.status = SubAgentStatus::Completed;
+        self.completed_at = Some(completed_at);
+        self.result = Some(result.into());
+    }
+
+    /// Mark the sub-agent as failed with an error message.
+    pub fn fail(&mut self, error: impl Into<String>, completed_at: DateTime<Utc>) {
+        self.status = SubAgentStatus::Failed;
+        self.completed_at = Some(completed_at);
+        self.result = Some(error.into());
     }
 }
 
@@ -326,5 +434,132 @@ mod tests {
 
         assert_eq!(session, deserialized);
         assert_eq!(deserialized.blocks.len(), 5);
+    }
+
+    #[test]
+    fn test_block_serialization_sub_agent_spawn() {
+        let ts = test_timestamp();
+        let block = Block::sub_agent_spawn(
+            "agent-123",
+            "Explore",
+            "Explore codebase",
+            "Find main entry points",
+            SubAgentStatus::Running,
+            ts,
+        );
+
+        let json = serde_json::to_string(&block).unwrap();
+        let deserialized: Block = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(block, deserialized);
+
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["type"], "sub_agent_spawn");
+        assert_eq!(value["agent_id"], "agent-123");
+        assert_eq!(value["agent_type"], "Explore");
+        assert_eq!(value["description"], "Explore codebase");
+        assert_eq!(value["prompt"], "Find main entry points");
+        assert_eq!(value["status"], "running");
+    }
+
+    #[test]
+    fn test_sub_agent_status_serialization() {
+        let running = SubAgentStatus::Running;
+        let completed = SubAgentStatus::Completed;
+        let failed = SubAgentStatus::Failed;
+
+        assert_eq!(serde_json::to_string(&running).unwrap(), r#""running""#);
+        assert_eq!(serde_json::to_string(&completed).unwrap(), r#""completed""#);
+        assert_eq!(serde_json::to_string(&failed).unwrap(), r#""failed""#);
+
+        // Deserialize
+        let running_de: SubAgentStatus = serde_json::from_str(r#""running""#).unwrap();
+        assert_eq!(running_de, SubAgentStatus::Running);
+
+        let completed_de: SubAgentStatus = serde_json::from_str(r#""completed""#).unwrap();
+        assert_eq!(completed_de, SubAgentStatus::Completed);
+
+        let failed_de: SubAgentStatus = serde_json::from_str(r#""failed""#).unwrap();
+        assert_eq!(failed_de, SubAgentStatus::Failed);
+    }
+
+    #[test]
+    fn test_sub_agent_meta_serialization() {
+        let ts = test_timestamp();
+        let meta = SubAgentMeta::new(
+            "agent-1",
+            "Plan",
+            "Plan feature",
+            "Design implementation",
+            ts,
+        );
+
+        let json = serde_json::to_string_pretty(&meta).unwrap();
+        let deserialized: SubAgentMeta = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(meta, deserialized);
+
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["id"], "agent-1");
+        assert_eq!(value["agent_type"], "Plan");
+        assert_eq!(value["description"], "Plan feature");
+        assert_eq!(value["prompt"], "Design implementation");
+        assert_eq!(value["status"], "running");
+        assert!(value["completed_at"].is_null());
+        assert!(value["result"].is_null());
+    }
+
+    #[test]
+    fn test_session_with_sub_agents() {
+        let ts = test_timestamp();
+        let mut session = Session::new("session-with-agents", ts);
+
+        session.add_block(Block::user_prompt("Help me explore", ts));
+        session.add_block(Block::sub_agent_spawn(
+            "agent-1",
+            "Explore",
+            "Explore codebase",
+            "Find files",
+            SubAgentStatus::Completed,
+            ts,
+        ));
+
+        let mut meta =
+            SubAgentMeta::new("agent-1", "Explore", "Explore codebase", "Find files", ts);
+        meta.complete("Found 10 files", ts);
+        session.sub_agents.push(meta);
+
+        let json = serde_json::to_string_pretty(&session).unwrap();
+        let deserialized: Session = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(session, deserialized);
+        assert_eq!(deserialized.sub_agents.len(), 1);
+        assert_eq!(deserialized.sub_agents[0].status, SubAgentStatus::Completed);
+    }
+
+    #[test]
+    fn test_session_without_sub_agents_omits_field() {
+        let ts = test_timestamp();
+        let session = Session::new("no-agents", ts);
+
+        let json = serde_json::to_string(&session).unwrap();
+
+        // The sub_agents field should be omitted when empty
+        assert!(!json.contains("sub_agents"));
+    }
+
+    #[test]
+    fn test_block_timestamp_sub_agent_spawn() {
+        let ts = test_timestamp();
+        let block = Block::sub_agent_spawn(
+            "agent-1",
+            "Explore",
+            "Explore",
+            "Find files",
+            SubAgentStatus::Running,
+            ts,
+        );
+
+        assert_eq!(block.timestamp(), ts);
     }
 }

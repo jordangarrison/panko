@@ -99,6 +99,21 @@ pub struct BlockView {
     /// Diff content (for FileEdit).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
+    /// Sub-agent ID (for SubAgentSpawn).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Sub-agent type (for SubAgentSpawn).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    /// Sub-agent description (for SubAgentSpawn).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Sub-agent prompt (for SubAgentSpawn).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// Sub-agent status (for SubAgentSpawn).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_status: Option<String>,
 }
 
 impl BlockView {
@@ -115,6 +130,11 @@ impl BlockView {
                 output_lines: None,
                 path: None,
                 diff: None,
+                agent_id: None,
+                agent_type: None,
+                description: None,
+                prompt: None,
+                agent_status: None,
             },
             Block::AssistantResponse { content, timestamp } => Self {
                 block_type: "assistant_response".to_string(),
@@ -126,6 +146,11 @@ impl BlockView {
                 output_lines: None,
                 path: None,
                 diff: None,
+                agent_id: None,
+                agent_type: None,
+                description: None,
+                prompt: None,
+                agent_status: None,
             },
             Block::Thinking { content, timestamp } => Self {
                 block_type: "thinking".to_string(),
@@ -137,6 +162,11 @@ impl BlockView {
                 output_lines: None,
                 path: None,
                 diff: None,
+                agent_id: None,
+                agent_type: None,
+                description: None,
+                prompt: None,
+                agent_status: None,
             },
             Block::ToolCall {
                 name,
@@ -170,6 +200,11 @@ impl BlockView {
                     output_lines,
                     path: None,
                     diff: None,
+                    agent_id: None,
+                    agent_type: None,
+                    description: None,
+                    prompt: None,
+                    agent_status: None,
                 }
             }
             Block::FileEdit {
@@ -186,6 +221,34 @@ impl BlockView {
                 output_lines: None,
                 path: Some(path.clone()),
                 diff: Some(diff.clone()),
+                agent_id: None,
+                agent_type: None,
+                description: None,
+                prompt: None,
+                agent_status: None,
+            },
+            Block::SubAgentSpawn {
+                agent_id,
+                agent_type,
+                description,
+                prompt,
+                status,
+                timestamp,
+            } => Self {
+                block_type: "sub_agent_spawn".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+                content_html: Some(markdown_to_html(prompt)),
+                name: None,
+                input: None,
+                output: None,
+                output_lines: None,
+                path: None,
+                diff: None,
+                agent_id: Some(agent_id.clone()),
+                agent_type: Some(agent_type.clone()),
+                description: Some(description.clone()),
+                prompt: Some(prompt.clone()),
+                agent_status: Some(format!("{:?}", status).to_lowercase()),
             },
         }
     }
