@@ -113,7 +113,14 @@ pub fn run_with_watcher(
 
         // Handle events
         match event_handler.next()? {
-            Event::Tick => app.tick(),
+            Event::Tick => {
+                app.tick();
+                // Process share messages inline to avoid terminal cycling
+                // This prevents screen flickering when shares are active
+                if app.has_pending_share() || app.share_manager().has_active_shares() {
+                    app.process_share_messages();
+                }
+            }
             Event::Key(key_event) => app.handle_key_event(key_event)?,
             Event::Resize(width, height) => app.handle_resize(width, height),
         }

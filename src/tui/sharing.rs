@@ -14,7 +14,7 @@ use tracing::{debug, error, info, info_span, warn};
 
 use crate::config::Config;
 use crate::parser::{ClaudeParser, SessionParser};
-use crate::server::{start_server, ServerConfig};
+use crate::server::{start_server_with_source, ServerConfig};
 use crate::tunnel::get_provider_with_config;
 
 // Global counter for generating unique share IDs
@@ -405,7 +405,13 @@ fn sharing_thread(
             open_browser: false,
         };
 
-        let server_handle = match start_server(session, server_config).await {
+        let server_handle = match start_server_with_source(
+            session,
+            server_config,
+            Some(session_path.clone()),
+        )
+        .await
+        {
             Ok(h) => {
                 info!(
                     elapsed_ms = phase_start.elapsed().as_millis() as u64,

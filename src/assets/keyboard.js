@@ -79,6 +79,81 @@
         });
     }
 
+    // Extract all session content as plain text
+    function extractSessionText() {
+        const blocks = document.querySelectorAll('.block');
+        const parts = [];
+
+        blocks.forEach(function(block) {
+            const type = block.getAttribute('data-type');
+            const content = block.querySelector('.block-content');
+            const toolName = block.getAttribute('data-tool-name');
+
+            if (type === 'user_prompt') {
+                parts.push('User:\n' + (content ? content.textContent.trim() : ''));
+            } else if (type === 'assistant_response') {
+                parts.push('Assistant:\n' + (content ? content.textContent.trim() : ''));
+            } else if (type === 'thinking') {
+                parts.push('Thinking:\n' + (content ? content.textContent.trim() : ''));
+            } else if (type === 'tool_call') {
+                const input = block.querySelector('.tool-input code');
+                const output = block.querySelector('.tool-output code');
+                let toolText = 'Tool (' + (toolName || 'unknown') + '):\n';
+                if (input) {
+                    toolText += 'Input: ' + input.textContent.trim();
+                }
+                if (output) {
+                    toolText += '\nOutput: ' + output.textContent.trim();
+                }
+                parts.push(toolText);
+            } else if (type === 'sub_agent_spawn') {
+                const description = block.querySelector('.sub-agent-description');
+                const result = block.querySelector('.sub-agent-result code');
+                let agentText = 'Sub-Agent:\n';
+                if (description) {
+                    agentText += description.textContent.trim();
+                }
+                if (result) {
+                    agentText += '\nResult: ' + result.textContent.trim();
+                }
+                parts.push(agentText);
+            } else if (type === 'file_edit') {
+                const diff = block.querySelector('.diff code');
+                parts.push('File Edit:\n' + (diff ? diff.textContent.trim() : ''));
+            }
+        });
+
+        return parts.join('\n\n---\n\n');
+    }
+
+    // Copy all session content to clipboard
+    function copyAllSession() {
+        const button = document.querySelector('.copy-all-btn');
+        const text = extractSessionText();
+
+        navigator.clipboard.writeText(text).then(function() {
+            // Show success state
+            if (button) {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+
+                setTimeout(function() {
+                    button.textContent = originalText;
+                    button.classList.remove('copied');
+                }, 2000);
+            }
+        }).catch(function(err) {
+            console.error('Failed to copy session:', err);
+            if (button) {
+                button.textContent = 'Error';
+                setTimeout(function() {
+                    button.textContent = '📋 Copy All';
+                }, 2000);
+            }
+        });
+    }
+
     // Handle copy button clicks
     function handleCopyClick(event) {
         const button = event.target;
@@ -288,6 +363,11 @@
                 event.preventDefault();
                 break;
 
+            case 'c':
+                copyAllSession();
+                event.preventDefault();
+                break;
+
             case '?':
                 showHelp();
                 event.preventDefault();
@@ -320,6 +400,12 @@
                     hideHelp();
                 }
             });
+        }
+
+        // Copy All button click
+        const copyAllBtn = document.querySelector('.copy-all-btn');
+        if (copyAllBtn) {
+            copyAllBtn.addEventListener('click', copyAllSession);
         }
 
         // Copy button clicks (using event delegation)

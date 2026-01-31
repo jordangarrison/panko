@@ -480,75 +480,9 @@ fn run_tui() -> Result<()> {
                 return Err(anyhow::anyhow!("Application error: {}", e));
             }
         }
-
-        // Check for sharing messages from all active shares
-        process_sharing_messages(&mut app);
     }
 
     Ok(())
-}
-
-/// Process sharing messages from all active shares.
-fn process_sharing_messages(app: &mut tui::App) {
-    // Poll messages from all handles
-    let messages = app.share_manager().poll_messages();
-    let mut shares_to_remove: Vec<tui::ShareId> = Vec::new();
-
-    for (share_id, msg) in messages {
-        match msg {
-            tui::SharingMessage::Started { url } => {
-                // Copy URL to clipboard
-                if let Ok(mut clipboard) = Clipboard::new() {
-                    let _ = clipboard.set_text(&url);
-                }
-
-                // Check if this is for a pending share
-                if let Some((pending_id, path, provider)) = app.take_pending_share() {
-                    if pending_id == share_id {
-                        // Get session name from path for modal
-                        let session_name = path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-
-                        // Complete the pending share
-                        app.share_manager_mut().mark_started(
-                            share_id,
-                            path,
-                            url.clone(),
-                            provider.clone(),
-                        );
-                        // Update legacy sharing state for UI compatibility
-                        app.set_sharing_active(url.clone(), provider.clone());
-
-                        // Show the share modal with session info
-                        app.show_share_modal(session_name, url, provider);
-                    }
-                }
-            }
-            tui::SharingMessage::Error { message } => {
-                eprintln!("Sharing error: {}", message);
-                shares_to_remove.push(share_id);
-                // Clear legacy state if this was the pending share
-                if app.pending_share_id() == Some(share_id) {
-                    app.clear_sharing_state();
-                }
-            }
-            tui::SharingMessage::Stopped => {
-                shares_to_remove.push(share_id);
-            }
-        }
-    }
-
-    // Remove stopped/errored shares
-    for id in shares_to_remove {
-        app.share_manager_mut().remove_handle(id);
-        // If no more shares, clear the legacy state
-        if !app.share_manager().has_active_shares() {
-            app.clear_sharing_state();
-        }
-    }
 }
 
 /// Handle an action triggered from the TUI.

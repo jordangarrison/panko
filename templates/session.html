@@ -19,6 +19,7 @@
             <time datetime="{{ session.started_at }}">{{ session.started_at }}</time>
         </div>
         <div class="header-actions">
+            <button class="copy-all-btn" aria-label="Copy entire session as text" title="Copy session as text (c)">📋 Copy All</button>
             <a href="/download" class="download-btn" aria-label="Download session file" title="Download session JSONL file">⬇ Download</a>
             <button class="help-hint" aria-label="Show keyboard shortcuts" title="Press ? for keyboard shortcuts">?</button>
         </div>
@@ -167,6 +168,10 @@
                 <div class="shortcut-group">
                     <dt><kbd>G</kbd></dt>
                     <dd>Go to last block</dd>
+                </div>
+                <div class="shortcut-group">
+                    <dt><kbd>c</kbd></dt>
+                    <dd>Copy entire session</dd>
                 </div>
                 <div class="shortcut-group">
                     <dt><kbd>?</kbd></dt>

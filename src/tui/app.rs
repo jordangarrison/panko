@@ -2,7 +2,7 @@
 
 use crate::scanner::{ScannerRegistry, SessionMeta};
 use crate::tui::actions::Action;
-use crate::tui::sharing::{ShareId, ShareManager};
+use crate::tui::sharing::{ShareId, ShareManager, SharingMessage};
 use crate::tui::widgets::{
     ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
     ProviderSelectState, SessionList, SessionListState, ShareModal, ShareModalState, SharesPanel,
@@ -778,6 +778,11 @@ impl App {
         self.pending_share_id
     }
 
+    /// Check if there's a pending share waiting for a Started message.
+    pub fn has_pending_share(&self) -> bool {
+        self.pending_share_id.is_some()
+    }
+
     /// Clear the pending share info and return the values.
     pub fn take_pending_share(&mut self) -> Option<(ShareId, PathBuf, String)> {
         let id = self.pending_share_id.take()?;
@@ -841,6 +846,61 @@ impl App {
         self.share_modal_state
             .as_ref()
             .map(|s| s.public_url.as_str())
+    }
+
+    /// Process pending share messages from background threads.
+    ///
+    /// This is called inline during the TUI event loop tick to handle
+    /// share state transitions without leaving the alternate screen,
+    /// which prevents screen flickering.
+    pub fn process_share_messages(&mut self) {
+        let messages = self.share_manager.poll_messages();
+        let mut shares_to_remove: Vec<ShareId> = Vec::new();
+
+        for (share_id, msg) in messages {
+            match msg {
+                SharingMessage::Started { url } => {
+                    // Copy URL to clipboard
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&url);
+                    }
+                    // Handle pending share state transitions
+                    if let Some((pending_id, path, provider)) = self.take_pending_share() {
+                        if pending_id == share_id {
+                            let session_name = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            self.share_manager.mark_started(
+                                share_id,
+                                path,
+                                url.clone(),
+                                provider.clone(),
+                            );
+                            self.set_sharing_active(url.clone(), provider.clone());
+                            self.show_share_modal(session_name, url, provider);
+                        }
+                    }
+                }
+                SharingMessage::Error { .. } => {
+                    shares_to_remove.push(share_id);
+                    if self.pending_share_id() == Some(share_id) {
+                        self.clear_sharing_state();
+                    }
+                }
+                SharingMessage::Stopped => {
+                    shares_to_remove.push(share_id);
+                }
+            }
+        }
+
+        for id in shares_to_remove {
+            self.share_manager.remove_handle(id);
+            if !self.share_manager.has_active_shares() {
+                self.clear_sharing_state();
+            }
+        }
     }
 
     /// Set a status message to display in the footer.
@@ -1021,6 +1081,8 @@ impl App {
 
     /// Render the shares panel.
     fn render_shares_panel(&mut self, frame: &mut Frame, area: Rect) {
+        // Always sync shares state before rendering to ensure panel is up-to-date
+        self.shares_panel_state.update(self.share_manager.shares());
         let shares = self.share_manager.shares();
         let widget = SharesPanel::new(shares);
         frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
