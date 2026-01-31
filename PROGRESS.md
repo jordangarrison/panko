@@ -1,5 +1,62 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 10: Concurrent share management
+
+### Summary
+Implemented concurrent share management allowing users to start multiple shares simultaneously. The status bar now shows the active share count, and the max_shares limit is configurable via the config command.
+
+### Changes
+- Updated `src/tui/app.rs`:
+  - Modified `render_footer()` to show active share count when shares exist
+  - Shows "📡 X shares (S to manage)" indicator in footer
+  - Added `set_max_shares()` and `max_shares()` methods for configuration
+  - 3 new unit tests for max_shares functionality
+
+- Updated `src/config.rs`:
+  - Added `max_shares: Option<usize>` field to `Config` struct
+  - Added `set_max_shares()` setter method
+  - Added `effective_max_shares()` to get config or default value
+  - Updated `is_empty()` to check max_shares
+  - Updated `format_config()` to display max_shares setting
+  - 8 new unit tests for max_shares configuration
+
+- Updated `src/main.rs`:
+  - Applied max_shares from config on TUI startup
+  - Added "max_shares" key to config set/unset commands
+  - Validates max_shares must be at least 1
+
+### Test Coverage (11 new tests)
+Config tests:
+- `test_max_shares_getter_setter` - getter/setter work
+- `test_max_shares_serialization` - TOML serialization
+- `test_format_config_with_max_shares` - format output with max_shares
+- `test_format_config_without_max_shares` - format output without max_shares
+- `test_effective_max_shares_uses_config` - config value used
+- `test_effective_max_shares_uses_default` - default value used
+- `test_is_empty_with_only_max_shares` - is_empty checks max_shares
+
+App tests:
+- `test_app_max_shares_default` - default is 5
+- `test_app_set_max_shares` - setting max_shares
+- `test_app_can_add_share_respects_max` - respects max limit
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (598 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] 's' starts NEW share (doesn't replace)
+- [x] Each share in own background thread
+- [x] Max limit configurable (default: 5)
+- [x] Status bar shows active share count
+- [x] Clean shutdown of all on exit
+
+---
+
 ## 2026-01-30 - M3 Story 9: Shares panel widget
 
 ### Summary

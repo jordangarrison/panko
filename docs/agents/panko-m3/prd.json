@@ -152,7 +152,7 @@
       "title": "Concurrent share management",
       "description": "Start multiple shares simultaneously",
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "'s' starts NEW share (doesn't replace)",
         "Each share in own background thread",

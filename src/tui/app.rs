@@ -295,6 +295,16 @@ impl App {
         self.session_list_state.set_sort_order(sort_order);
     }
 
+    /// Set the maximum number of concurrent shares.
+    pub fn set_max_shares(&mut self, max_shares: usize) {
+        self.share_manager.max_shares = max_shares;
+    }
+
+    /// Get the maximum number of concurrent shares.
+    pub fn max_shares(&self) -> usize {
+        self.share_manager.max_shares
+    }
+
     /// Returns true if the application is running.
     pub fn is_running(&self) -> bool {
         self.running
@@ -1317,20 +1327,6 @@ impl App {
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
             )])
-        } else if let Some(url) = self.sharing_state.public_url() {
-            // Sharing is active - show URL and stop hint
-            Line::from(vec![
-                Span::styled("🌐 Sharing at ", Style::default().fg(Color::Green)),
-                Span::styled(
-                    url,
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" - press ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Esc", Style::default().fg(Color::Yellow)),
-                Span::styled(" to stop", Style::default().fg(Color::DarkGray)),
-            ])
         } else if matches!(self.sharing_state, SharingState::Starting { .. }) {
             // Starting sharing - show loading message
             Line::from(vec![Span::styled(
@@ -1350,8 +1346,9 @@ impl App {
                 Style::default().fg(Color::Yellow),
             )])
         } else {
-            // Normal footer
-            Line::from(vec![
+            // Build the base footer with optional share count indicator
+            let share_count = self.share_manager.active_count();
+            let mut spans = vec![
                 Span::styled(" v ", Style::default().fg(Color::Cyan)),
                 Span::raw("view  "),
                 Span::styled("s ", Style::default().fg(Color::Cyan)),
@@ -1364,7 +1361,28 @@ impl App {
                 Span::raw("refresh  "),
                 Span::styled("q ", Style::default().fg(Color::Cyan)),
                 Span::raw("quit"),
-            ])
+            ];
+
+            // If there are active shares, add indicator at the end
+            if share_count > 0 {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!(
+                        "📡 {} {}",
+                        share_count,
+                        if share_count == 1 { "share" } else { "shares" }
+                    ),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    " (S to manage)",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            Line::from(spans)
         };
 
         let paragraph = Paragraph::new(content)
@@ -2988,6 +3006,48 @@ mod tests {
 
         assert_eq!(app.active_share_count(), 1);
         assert!(app.share_manager().has_active_shares());
+    }
+
+    #[test]
+    fn test_app_max_shares_default() {
+        let app = App::new();
+        assert_eq!(app.max_shares(), DEFAULT_MAX_SHARES);
+    }
+
+    #[test]
+    fn test_app_set_max_shares() {
+        let mut app = App::new();
+        app.set_max_shares(10);
+        assert_eq!(app.max_shares(), 10);
+    }
+
+    #[test]
+    fn test_app_can_add_share_respects_max() {
+        let mut app = App::new();
+        app.set_max_shares(2);
+
+        // Initially can add
+        assert!(app.can_add_share());
+
+        // Add first share
+        let id1 = ShareId::new();
+        app.share_manager_mut().mark_started(
+            id1,
+            PathBuf::from("/a.jsonl"),
+            "https://a.com".into(),
+            "ngrok".into(),
+        );
+        assert!(app.can_add_share()); // Can still add
+
+        // Add second share
+        let id2 = ShareId::new();
+        app.share_manager_mut().mark_started(
+            id2,
+            PathBuf::from("/b.jsonl"),
+            "https://b.com".into(),
+            "cloudflare".into(),
+        );
+        assert!(!app.can_add_share()); // At max, can't add more
     }
 
     // Share modal tests

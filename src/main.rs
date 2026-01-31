@@ -412,6 +412,9 @@ fn run_tui() -> Result<()> {
         }
     }
 
+    // Apply max_shares from config (default is 5)
+    app.set_max_shares(config.effective_max_shares(tui::DEFAULT_MAX_SHARES));
+
     // Track initial sort order to detect changes
     let initial_sort_order = app.sort_order();
 
@@ -882,9 +885,24 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                         println!("Set default_sort = \"{}\"", value);
                     }
                 }
+                "max_shares" => {
+                    if value.is_empty() {
+                        config.set_max_shares(None);
+                        println!("Unset max_shares");
+                    } else {
+                        let max: usize = value
+                            .parse()
+                            .context("Invalid max_shares value. Must be a positive integer")?;
+                        if max == 0 {
+                            anyhow::bail!("max_shares must be at least 1");
+                        }
+                        config.set_max_shares(Some(max));
+                        println!("Set max_shares = {}", max);
+                    }
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares",
                         key
                     );
                 }
@@ -912,9 +930,13 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                     config.set_default_sort(None);
                     println!("Unset default_sort");
                 }
+                "max_shares" => {
+                    config.set_max_shares(None);
+                    println!("Unset max_shares");
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares",
                         key
                     );
                 }
