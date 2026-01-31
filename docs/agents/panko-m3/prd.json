@@ -167,7 +167,7 @@
       "title": "Open draft PR for M3",
       "description": "Create draft PR for feature/multi-share branch",
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "All stories 1-10 pass",
         "Branch pushed to remote",
