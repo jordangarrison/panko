@@ -1,4 +1,4 @@
-# Agent Replay - TUI Session Browser
+# Panko - TUI Session Browser
 
 Build a terminal UI for browsing, previewing, and sharing AI coding agent sessions. This extends the existing `panko` CLI with an interactive browser mode.
 
@@ -48,7 +48,7 @@ src/
 ## TUI Layout
 
 ```
-┌─ Agent Replay ─────────────────────────────────────────────────┐
+┌─ Panko ────────────────────────────────────────────────────────┐
 │ Search: _                                            [?] Help  │
 ├────────────────────────────────┬───────────────────────────────┤
 │ Sessions                       │ Preview                       │

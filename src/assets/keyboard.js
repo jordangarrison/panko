@@ -1,5 +1,5 @@
 /**
- * Agent Replay - Keyboard Navigation
+ * Panko - Keyboard Navigation
  *
  * Provides vim-style navigation between session blocks:
  * - j/Down: Next block

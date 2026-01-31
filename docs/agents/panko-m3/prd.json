@@ -8,7 +8,7 @@
       "title": "Fix branding (Agent Replay → Panko)",
       "description": "Update all references from 'Agent Replay' to 'Panko' throughout the codebase",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Update templates/session.html title and header",
         "Update src/tui/app.rs TUI titles",

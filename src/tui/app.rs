@@ -778,7 +778,7 @@ impl App {
     /// Render message when terminal is too small.
     fn render_too_small(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default()
-            .title(" Agent Replay ")
+            .title(" Panko ")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded);
@@ -820,7 +820,7 @@ impl App {
     /// Render the header section.
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default()
-            .title(" Agent Replay ")
+            .title(" Panko ")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded);

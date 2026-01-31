@@ -1,4 +1,4 @@
-# Agent Replay - CLI Share Tool
+# Panko - CLI Share Tool
 
 Build a Rust CLI tool called `panko` that allows users to view and share AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing.
 
