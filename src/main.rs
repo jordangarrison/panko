@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use panko::config::{format_config, Config};
 use panko::parser::{ClaudeParser, SessionParser};
 use panko::server::{run_server, shutdown_signal, start_server, ServerConfig};
+use panko::tui;
 use panko::tunnel::{detect_available_providers, get_provider_with_config, AvailableProvider};
 
 #[derive(Parser)]
@@ -14,11 +15,11 @@ use panko::tunnel::{detect_available_providers, get_provider_with_config, Availa
 #[command(version)]
 #[command(about = "View and share AI coding agent sessions")]
 #[command(
-    long_about = "A CLI tool for viewing and sharing AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing."
+    long_about = "A CLI tool for viewing and sharing AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing.\n\nRun without arguments to enter interactive TUI mode."
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -118,6 +119,45 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Open a folder in the system file manager.
+///
+/// Cross-platform support:
+/// - macOS: uses `open`
+/// - Linux: uses `xdg-open`
+/// - Windows: uses `explorer`
+fn open_in_file_manager(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .context("Failed to open folder with 'open'")?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .context("Failed to open folder with 'xdg-open'")?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .context("Failed to open folder with 'explorer'")?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        anyhow::bail!("Opening folders is not supported on this platform");
+    }
+
+    Ok(())
+}
+
 /// Prompt the user to select a tunnel provider.
 fn prompt_tunnel_selection(providers: &[AvailableProvider]) -> Result<AvailableProvider> {
     let options: Vec<String> = providers
@@ -140,7 +180,15 @@ fn prompt_tunnel_selection(providers: &[AvailableProvider]) -> Result<AvailableP
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
+    // If no subcommand is provided, enter TUI mode
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            return run_tui();
+        }
+    };
+
+    match command {
         Commands::View {
             file,
             port,
@@ -341,6 +389,285 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Run the TUI application.
+fn run_tui() -> Result<()> {
+    // Load configuration
+    let mut config = Config::load().unwrap_or_default();
+
+    // Create application state and load sessions
+    let mut app = tui::App::new();
+    if let Err(e) = app.load_sessions() {
+        // Log warning but continue - user can still refresh
+        eprintln!("Warning: Failed to load sessions: {}", e);
+    }
+
+    // Apply sort order from config
+    if let Some(ref sort_str) = config.default_sort {
+        if let Some(sort_order) = tui::SortOrder::from_str(sort_str) {
+            app.set_sort_order(sort_order);
+        }
+    }
+
+    // Track initial sort order to detect changes
+    let initial_sort_order = app.sort_order();
+
+    // Track the active sharing handle (if any)
+    let mut sharing_handle: Option<tui::SharingHandle> = None;
+
+    // Main loop that handles TUI and actions
+    loop {
+        // Initialize terminal
+        let mut terminal = tui::init().context("Failed to initialize terminal")?;
+
+        // Run the TUI until it returns
+        let result = tui::run(&mut terminal, &mut app);
+
+        // Restore terminal before handling any action
+        tui::restore().context("Failed to restore terminal")?;
+
+        // Handle the result
+        match result {
+            Ok(tui::RunResult::Done) => {
+                // User quit - stop any active sharing first
+                if let Some(handle) = sharing_handle.take() {
+                    handle.stop();
+                }
+
+                // Save sort order if changed
+                let final_sort_order = app.sort_order();
+                if final_sort_order != initial_sort_order {
+                    config.set_default_sort(Some(final_sort_order.as_str().to_string()));
+                    if let Err(e) = config.save() {
+                        eprintln!("Warning: Failed to save config: {}", e);
+                    }
+                }
+
+                break;
+            }
+            Ok(tui::RunResult::Continue) => {
+                // This shouldn't happen but just continue
+                continue;
+            }
+            Ok(tui::RunResult::Action(action)) => {
+                // Handle the action
+                handle_tui_action(&action, &mut app, &mut sharing_handle)?;
+                // Continue the TUI loop after action completes
+            }
+            Err(e) => {
+                // Stop sharing on error
+                if let Some(handle) = sharing_handle.take() {
+                    handle.stop();
+                }
+                return Err(anyhow::anyhow!("Application error: {}", e));
+            }
+        }
+
+        // Check for sharing messages
+        let mut should_clear_handle = false;
+        if let Some(ref handle) = sharing_handle {
+            while let Some(msg) = handle.try_recv() {
+                match msg {
+                    tui::SharingMessage::Started { url } => {
+                        // Copy URL to clipboard
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            let _ = clipboard.set_text(&url);
+                        }
+                        // Update app state
+                        app.set_sharing_active(url, "tunnel".to_string());
+                    }
+                    tui::SharingMessage::Error { message } => {
+                        eprintln!("Sharing error: {}", message);
+                        app.clear_sharing_state();
+                        should_clear_handle = true;
+                    }
+                    tui::SharingMessage::Stopped => {
+                        app.clear_sharing_state();
+                        should_clear_handle = true;
+                    }
+                }
+            }
+        }
+        if should_clear_handle {
+            sharing_handle = None;
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle an action triggered from the TUI.
+fn handle_tui_action(
+    action: &tui::Action,
+    app: &mut tui::App,
+    sharing_handle: &mut Option<tui::SharingHandle>,
+) -> Result<()> {
+    match action {
+        tui::Action::ViewSession(path) => {
+            // Stop any active sharing before viewing
+            if let Some(handle) = sharing_handle.take() {
+                handle.stop();
+                app.clear_sharing_state();
+            }
+            // View the session using the existing server code
+            handle_view_from_tui(path)?;
+        }
+        tui::Action::ShareSession(path) => {
+            // Detect available providers
+            let available = detect_available_providers();
+            if available.is_empty() {
+                eprintln!(
+                    "No tunnel providers available. Install cloudflared, ngrok, or tailscale."
+                );
+                wait_for_key("Press Enter to continue...");
+                return Ok(());
+            }
+
+            // Convert to ProviderOption
+            let providers: Vec<tui::ProviderOption> = available
+                .iter()
+                .map(|p| tui::ProviderOption::new(p.name, p.display_name))
+                .collect();
+
+            if providers.len() == 1 {
+                // Only one provider - start sharing immediately
+                let provider = &providers[0];
+                *sharing_handle = Some(tui::SharingHandle::start(
+                    path.clone(),
+                    provider.name.clone(),
+                ));
+                app.set_sharing_active("Starting...".to_string(), provider.name.clone());
+            } else {
+                // Multiple providers - show selection popup
+                app.start_provider_selection(path.clone(), providers);
+            }
+        }
+        tui::Action::StartSharing { path, provider } => {
+            // Start sharing with the selected provider
+            *sharing_handle = Some(tui::SharingHandle::start(path.clone(), provider.clone()));
+        }
+        tui::Action::StopSharing => {
+            // Stop the current sharing session
+            if let Some(handle) = sharing_handle.take() {
+                handle.stop();
+            }
+            app.clear_sharing_state();
+        }
+        tui::Action::SharingStarted { url, provider } => {
+            // This is handled via the message channel now
+            app.set_sharing_active(url.clone(), provider.clone());
+        }
+        tui::Action::CopyPath(path) => {
+            // Copy the session file path to clipboard
+            let path_str = path.display().to_string();
+            match copy_to_clipboard(&path_str) {
+                Ok(()) => {
+                    app.set_status_message(format!("✓ Copied: {}", path_str));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Copy failed: {}", e));
+                }
+            }
+        }
+        tui::Action::OpenFolder(path) => {
+            // Open the containing folder in the system file manager
+            if let Some(parent) = path.parent() {
+                match open_in_file_manager(parent) {
+                    Ok(()) => {
+                        app.set_status_message(format!("✓ Opened: {}", parent.display()));
+                    }
+                    Err(e) => {
+                        app.set_status_message(format!("✗ Open failed: {}", e));
+                    }
+                }
+            } else {
+                app.set_status_message("✗ Cannot determine parent folder");
+            }
+        }
+        tui::Action::DeleteSession(path) => {
+            // Delete the session file
+            match std::fs::remove_file(path) {
+                Ok(()) => {
+                    // Remove the session from the list
+                    app.remove_session_by_path(path);
+                    app.set_status_message("✓ Deleted session");
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Delete failed: {}", e));
+                }
+            }
+        }
+        tui::Action::None => {
+            // Nothing to do
+        }
+    }
+    Ok(())
+}
+
+/// Handle viewing a session from the TUI.
+///
+/// This is similar to the view command but with messaging appropriate
+/// for returning to the TUI afterwards.
+fn handle_view_from_tui(path: &Path) -> Result<()> {
+    // Check file exists
+    if !path.exists() {
+        eprintln!("Error: File not found: {}", path.display());
+        wait_for_key("Press Enter to return to the browser...");
+        return Ok(());
+    }
+
+    // Parse the session
+    let session = match parse_session(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: Failed to parse session: {}", e);
+            wait_for_key("Press Enter to return to the browser...");
+            return Ok(());
+        }
+    };
+
+    println!(
+        "\nViewing session '{}' with {} blocks",
+        session.id,
+        session.blocks.len()
+    );
+    println!("Press Ctrl+C to return to the browser\n");
+
+    // Load configuration for port
+    let app_config = Config::load().unwrap_or_default();
+    let effective_port = app_config.effective_port(3000);
+
+    // Run the server
+    let server_config = ServerConfig {
+        base_port: effective_port,
+        open_browser: true,
+    };
+
+    // Run the server using the current runtime (we're already inside #[tokio::main])
+    // Use block_in_place to run async code from synchronous context within runtime
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            if let Err(e) = run_server(session, server_config).await {
+                eprintln!("Server error: {}", e);
+            }
+        })
+    });
+
+    println!("\nReturning to session browser...\n");
+
+    Ok(())
+}
+
+/// Wait for the user to press Enter.
+fn wait_for_key(message: &str) {
+    use std::io::{self, BufRead, Write};
+
+    print!("{}", message);
+    let _ = io::stdout().flush();
+
+    let stdin = io::stdin();
+    let _ = stdin.lock().lines().next();
+}
+
 /// Handle config subcommand
 fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
     match action {
@@ -395,9 +722,25 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                         println!("Set default_port = {}", port);
                     }
                 }
+                "default_sort" => {
+                    if value.is_empty() {
+                        config.set_default_sort(None);
+                        println!("Unset default_sort");
+                    } else {
+                        // Validate sort option
+                        if tui::SortOrder::from_str(&value).is_none() {
+                            anyhow::bail!(
+                                "Invalid sort option '{}'. Valid options: date_newest, date_oldest, message_count, project_name",
+                                value
+                            );
+                        }
+                        config.set_default_sort(Some(value.clone()));
+                        println!("Set default_sort = \"{}\"", value);
+                    }
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
                         key
                     );
                 }
@@ -421,9 +764,13 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                     config.set_default_port(None);
                     println!("Unset default_port");
                 }
+                "default_sort" => {
+                    config.set_default_sort(None);
+                    println!("Unset default_sort");
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort",
                         key
                     );
                 }

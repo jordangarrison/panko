@@ -8,7 +8,7 @@
       "title": "Session scanner trait and Claude implementation",
       "description": "Create scanner abstraction for discovering sessions without full parsing",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "SessionMeta struct with id, path, project_path, updated_at, message_count, first_prompt_preview",
         "SessionScanner trait with scan_directory() and default_roots() methods",
@@ -24,7 +24,7 @@
       "title": "TUI application scaffold with ratatui",
       "description": "Set up basic TUI application structure and event loop",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Add ratatui and crossterm dependencies",
         "App struct with state management",
@@ -40,7 +40,7 @@
       "title": "Session list widget with project grouping",
       "description": "Render sessions grouped by project in a tree view",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Sessions grouped under project path headers",
         "Project folders can be collapsed/expanded with h/l or arrows",
@@ -56,7 +56,7 @@
       "title": "Preview panel",
       "description": "Show details of selected session in right panel",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Panel shows session id, full path, started timestamp",
         "Shows message count and estimated token count if available",
@@ -72,7 +72,7 @@
       "title": "Layout with resizable panels",
       "description": "Implement the full TUI layout with header, panels, and footer",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Header with app title and search input area",
         "Two-column layout: session list (left), preview (right)",
@@ -88,7 +88,7 @@
       "title": "View action integration",
       "description": "Launch web viewer for selected session",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "v or Enter triggers view action",
         "TUI suspends (restores terminal) while viewer runs",
@@ -103,7 +103,7 @@
       "title": "Share action integration",
       "description": "Share selected session with tunnel from TUI",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "s triggers share action",
         "If multiple tunnel providers, shows selection popup within TUI",
@@ -119,7 +119,7 @@
       "title": "Copy path and open folder actions",
       "description": "Quick actions for file management",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "c copies full session file path to clipboard",
         "Shows brief confirmation message",
@@ -133,7 +133,7 @@
       "title": "Fuzzy search",
       "description": "Filter sessions by fuzzy matching project path and prompt content",
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "/ focuses search input in header",
         "Typing filters session list in real-time",
@@ -150,7 +150,7 @@
       "title": "Help overlay",
       "description": "Show keyboard shortcuts in modal overlay",
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "? toggles help overlay",
         "Overlay shows all keyboard shortcuts grouped by category",
@@ -165,7 +165,7 @@
       "title": "Refresh and auto-refresh",
       "description": "Refresh session list manually and optionally watch for changes",
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "r manually refreshes session list",
         "Shows brief 'Refreshing...' indicator",
@@ -180,7 +180,7 @@
       "title": "Sorting options",
       "description": "Allow sorting sessions by different criteria",
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Default sort: by updated_at descending (newest first)",
         "S key cycles through sort options",
@@ -195,7 +195,7 @@
       "title": "Multiple agent support in scanner",
       "description": "Extend scanner to detect and scan multiple agent session locations",
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Scanner registry that holds multiple SessionScanner implementations",
         "Codex scanner stub (for future implementation)",
@@ -210,7 +210,7 @@
       "title": "Session deletion with confirmation",
       "description": "Allow deleting sessions from TUI with safety confirmation",
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "d key initiates delete for selected session",
         "Confirmation dialog: 'Delete session abc123? (y/N)'",
@@ -220,6 +220,23 @@
         "Cannot delete while sharing is active"
       ],
       "depends_on": ["5"]
+    },
+    {
+      "id": "15",
+      "title": "Open draft PR for milestone",
+      "description": "Create a draft pull request on GitHub for the feature/tui-browser branch",
+      "priority": 15,
+      "passes": true,
+      "acceptance_criteria": [
+        "All previous stories (1-14) have passes: true",
+        "Branch is pushed to remote with all commits",
+        "Draft PR created via gh CLI targeting main branch",
+        "PR title: 'feat(tui): Interactive TUI for browsing and sharing AI coding agent sessions'",
+        "PR body includes summary of features implemented",
+        "PR body includes test plan checklist",
+        "PR is marked as draft (not ready for review)"
+      ],
+      "depends_on": ["14"]
     }
   ]
 }

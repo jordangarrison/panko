@@ -1,0 +1,180 @@
+{
+  "name": "panko",
+  "branchName": "feature/multi-share",
+  "description": "Enhanced sharing, context export & UI improvements for Panko",
+  "stories": [
+    {
+      "id": "1",
+      "title": "Fix branding (Agent Replay → Panko)",
+      "description": "Update all references from 'Agent Replay' to 'Panko' throughout the codebase",
+      "priority": 1,
+      "passes": false,
+      "acceptance_criteria": [
+        "Update templates/session.html title and header",
+        "Update src/tui/app.rs TUI titles",
+        "Update src/assets/styles.css comment header",
+        "Update src/assets/keyboard.js comment header",
+        "Update docs/agents/panko-m1/PROMPT.md header",
+        "Update docs/agents/panko-m2/PROMPT.md header and ASCII diagram",
+        "Search for any other 'Agent Replay' references",
+        "Verify web UI shows 'Panko' in browser tab and header"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "2",
+      "title": "Fix tool output rendering in web UI",
+      "description": "Improve tool call rendering so inputs/outputs are readable, not compressed single-line JSON",
+      "priority": 2,
+      "passes": false,
+      "acceptance_criteria": [
+        "Tool inputs display as formatted, syntax-highlighted JSON (not minified)",
+        "Long tool outputs wrap properly with horizontal scroll only when needed",
+        "Tool <details> sections default to expanded for important tools (Write, Edit, Bash)",
+        "Add 'Copy' button to tool input/output blocks",
+        "Syntax highlighting for JSON in tool blocks",
+        "Large outputs (>100 lines) stay collapsed with 'Show full output' option"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "3",
+      "title": "Copy context to clipboard (TUI)",
+      "description": "Allow copying entire session context to clipboard for reuse in a new Claude Code session",
+      "priority": 3,
+      "passes": false,
+      "acceptance_criteria": [
+        "Shift+C on selected session triggers copy context",
+        "Formats session as markdown: user prompts, assistant responses, key tool results",
+        "Excludes verbose tool outputs (keeps summary only)",
+        "Shows confirmation: 'Context copied (X messages, ~Y tokens)'",
+        "Includes session metadata header (project, date)",
+        "Clipboard content is paste-ready for Claude Code"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "4",
+      "title": "Download session file",
+      "description": "Add download button/action in web UI to download the raw JSONL session file",
+      "priority": 4,
+      "passes": false,
+      "acceptance_criteria": [
+        "Download button visible in web UI header",
+        "Downloads original JSONL file with proper filename: {session_id}.jsonl",
+        "Add download action in TUI: Shift+D to save copy to ~/Downloads",
+        "Confirmation shows file path: 'Saved to ~/Downloads/abc123.jsonl'",
+        "Works for shared sessions (download from public URL)"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "5",
+      "title": "Parse Task tool for sub-agent tracking",
+      "description": "Extend parser to recognize Task tool calls and track sub-agent spawning",
+      "priority": 5,
+      "passes": false,
+      "acceptance_criteria": [
+        "New Block::SubAgentSpawn variant with: agent_id, agent_type, prompt, status",
+        "ClaudeParser detects Task tool calls and extracts sub-agent info",
+        "Track sub-agent completion via tool results",
+        "Session gains sub_agents: Vec<SubAgentMeta> for tracking",
+        "Unit tests with fixture containing Task tool calls",
+        "Backwards compatible (old sessions still parse)"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "6",
+      "title": "Sub-agent flow visualization (web UI)",
+      "description": "Display sub-agent spawns and their outputs in a threaded/nested view",
+      "priority": 6,
+      "passes": false,
+      "acceptance_criteria": [
+        "Sub-agent blocks visually indented or in collapsible section",
+        "Shows agent type badge (Explore, Plan, Bash, etc.)",
+        "Expandable to see sub-agent's full prompt and results",
+        "Visual connector lines showing parent→child relationship",
+        "Option to 'View sub-agent in detail' (expands inline)"
+      ],
+      "depends_on": ["5"]
+    },
+    {
+      "id": "7",
+      "title": "Refactor sharing state for multiple shares",
+      "description": "Refactor single SharingState to support multiple concurrent shares",
+      "priority": 7,
+      "passes": false,
+      "acceptance_criteria": [
+        "New ActiveShare struct: id, session_path, public_url, provider_name, started_at",
+        "App.active_shares: Vec<ActiveShare> replaces single state",
+        "App.sharing_handles: HashMap<ShareId, SharingHandle> for handles",
+        "Unique ShareId per share",
+        "Single-share flow still works (pressing 's')",
+        "Can stop individual shares by ID",
+        "Unit tests for new structures"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "8",
+      "title": "Share started modal with URL",
+      "description": "Modal popup showing public URL when share starts",
+      "priority": 8,
+      "passes": false,
+      "acceptance_criteria": [
+        "Modal appears on SharingMessage::Started",
+        "Shows: session name, public URL (bold/colored), provider",
+        "Auto-dismisses after 5 seconds OR on keypress",
+        "'c' copies URL to clipboard",
+        "Esc/Enter closes immediately",
+        "Uses existing modal pattern"
+      ],
+      "depends_on": ["7"]
+    },
+    {
+      "id": "9",
+      "title": "Shares panel widget",
+      "description": "Panel showing all active shares with controls",
+      "priority": 9,
+      "passes": false,
+      "acceptance_criteria": [
+        "Shift+S toggles shares panel",
+        "Lists: session name, URL, provider, duration",
+        "j/k navigation, Enter copies URL, d stops share",
+        "'No active shares' when empty",
+        "Esc/Shift+S dismisses"
+      ],
+      "depends_on": ["7"]
+    },
+    {
+      "id": "10",
+      "title": "Concurrent share management",
+      "description": "Start multiple shares simultaneously",
+      "priority": 10,
+      "passes": false,
+      "acceptance_criteria": [
+        "'s' starts NEW share (doesn't replace)",
+        "Each share in own background thread",
+        "Max limit configurable (default: 5)",
+        "Status bar shows active share count",
+        "Clean shutdown of all on exit"
+      ],
+      "depends_on": ["7", "8", "9"]
+    },
+    {
+      "id": "11",
+      "title": "Open draft PR for M3",
+      "description": "Create draft PR for feature/multi-share branch",
+      "priority": 11,
+      "passes": false,
+      "acceptance_criteria": [
+        "All stories 1-10 pass",
+        "Branch pushed to remote",
+        "Draft PR via gh CLI targeting main",
+        "PR includes feature summary and test plan"
+      ],
+      "depends_on": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+    }
+  ]
+}

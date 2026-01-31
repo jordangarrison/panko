@@ -42,12 +42,22 @@ arboard = "3"
 thiserror = "1"
 anyhow = "1"
 
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
 # Config
 toml = "0.8"
 dirs = "5"
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
+
+# Fuzzy matching
+fuzzy-matcher = "0.3"
+
+# File watching
+notify = "6"
 
 # Browser opening
 webbrowser = "1"
