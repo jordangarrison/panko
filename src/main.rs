@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use panko::config::{format_config, Config};
 use panko::export::{format_context, ContextOptions};
+use panko::logging::{init_logging, init_tui_logging, LogConfig, Verbosity};
 use panko::parser::{ClaudeParser, SessionParser};
 use panko::server::{
     run_server_with_source, shutdown_signal, start_server_with_source, ServerConfig,
@@ -21,6 +22,10 @@ use panko::tunnel::{detect_available_providers, get_provider_with_config, Availa
     long_about = "A CLI tool for viewing and sharing AI coding agent sessions (Claude Code, Codex, etc.) via a local web server with optional tunnel sharing.\n\nRun without arguments to enter interactive TUI mode."
 )]
 struct Cli {
+    /// Enable verbose logging (can be repeated: -v for debug, -vv for trace)
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -183,13 +188,33 @@ fn prompt_tunnel_selection(providers: &[AvailableProvider]) -> Result<AvailableP
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Load configuration for log file path
+    let app_config = Config::load().unwrap_or_default();
+
+    // Determine verbosity level from CLI
+    let verbosity = match cli.verbose {
+        0 => Verbosity::Quiet,
+        1 => Verbosity::Normal,
+        2 => Verbosity::Verbose,
+        _ => Verbosity::Trace,
+    };
+
     // If no subcommand is provided, enter TUI mode
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
+            // For TUI mode, only log to file (if configured) since stderr is used by the TUI
+            let _log_guard = init_tui_logging(app_config.log_file.as_deref());
             return run_tui();
         }
     };
+
+    // Initialize logging for CLI commands
+    let log_config = LogConfig {
+        verbosity,
+        log_file: app_config.log_file.clone(),
+    };
+    let _log_guard = init_logging(&log_config);
 
     match command {
         Commands::View {
@@ -197,9 +222,6 @@ async fn main() -> Result<()> {
             port,
             no_browser,
         } => {
-            // Load configuration
-            let app_config = Config::load().unwrap_or_default();
-
             // Check file exists
             if !file.exists() {
                 anyhow::bail!("File not found: {}", file.display());
@@ -227,9 +249,6 @@ async fn main() -> Result<()> {
             run_server_with_source(session, server_config, Some(file)).await?;
         }
         Commands::Share { file, tunnel, port } => {
-            // Load configuration
-            let app_config = Config::load().unwrap_or_default();
-
             // Check file exists
             if !file.exists() {
                 anyhow::bail!("File not found: {}", file.display());
@@ -900,9 +919,18 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                         println!("Set max_shares = {}", max);
                     }
                 }
+                "log_file" => {
+                    if value.is_empty() {
+                        config.set_log_file(None);
+                        println!("Unset log_file");
+                    } else {
+                        config.set_log_file(Some(value.clone()));
+                        println!("Set log_file = \"{}\"", value);
+                    }
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares, log_file",
                         key
                     );
                 }
@@ -934,9 +962,13 @@ fn handle_config_command(action: Option<ConfigAction>) -> Result<()> {
                     config.set_max_shares(None);
                     println!("Unset max_shares");
                 }
+                "log_file" => {
+                    config.set_log_file(None);
+                    println!("Unset log_file");
+                }
                 _ => {
                     anyhow::bail!(
-                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares",
+                        "Unknown configuration key '{}'. Valid keys: default_provider, ngrok_token, default_port, default_sort, max_shares, log_file",
                         key
                     );
                 }

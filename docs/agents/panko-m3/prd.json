@@ -175,6 +175,39 @@
         "PR includes feature summary and test plan"
       ],
       "depends_on": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+    },
+    {
+      "id": "12",
+      "title": "Add structured logging and diagnostics for sharing",
+      "description": "Add tracing-based logging infrastructure for sharing operations. Logs capture all phases (parsing, server start, tunnel spawn, URL detection) with timing. Support configurable log file output since TUI uses stdout/stderr.",
+      "priority": 12,
+      "passes": true,
+      "acceptance_criteria": [
+        "Add `tracing` and `tracing-subscriber` with file appender to Cargo.toml",
+        "Add `log_file` option to Config struct (~/.config/panko/config.toml)",
+        "Add phase logging in sharing_thread(): runtime creation, session parsing, config loading, server start, tunnel spawn, URL received",
+        "Capture and log tunnel subprocess stderr output instead of discarding",
+        "Add timing spans measuring each sharing phase duration",
+        "Add `--verbose` / `-v` CLI flag that increases log verbosity"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "13",
+      "title": "Create MockTunnelProvider and E2E testing for multi-share",
+      "description": "Implement MockTunnelProvider that returns predictable URLs without subprocesses. Add E2E tests validating full sharing flow including concurrent shares, unique IDs, limit enforcement, and graceful shutdown.",
+      "priority": 13,
+      "passes": false,
+      "acceptance_criteria": [
+        "Create MockTunnelProvider implementing TunnelProvider trait (returns configurable URLs instantly)",
+        "MockTunnelProvider can simulate startup delay and errors for testing",
+        "Add #[cfg(test)] injection point to use mock provider in tests",
+        "Create tests/sharing_e2e.rs with test starting share via MockTunnelProvider",
+        "Add test: start 3 concurrent shares, verify unique ShareIds and all URLs work",
+        "Add test: exceed max_shares limit, verify proper rejection",
+        "Add test: graceful shutdown with active shares, verify all stopped cleanly"
+      ],
+      "depends_on": []
     }
   ]
 }

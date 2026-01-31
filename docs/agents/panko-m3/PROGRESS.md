@@ -11,16 +11,18 @@
 | ID | Title | Status | Notes |
 |----|-------|--------|-------|
 | 1 | Fix branding (Agent Replay → Panko) | ✅ Complete | |
-| 2 | Fix tool output rendering in web UI | ⬜ Not Started | |
-| 3 | Copy context to clipboard (TUI) | ⬜ Not Started | |
-| 4 | Download session file | ⬜ Not Started | |
-| 5 | Parse Task tool for sub-agent tracking | ⬜ Not Started | |
-| 6 | Sub-agent flow visualization (web UI) | ⬜ Not Started | Depends on Story 5 |
-| 7 | Refactor sharing state for multiple shares | ⬜ Not Started | |
-| 8 | Share started modal with URL | ⬜ Not Started | Depends on Story 7 |
-| 9 | Shares panel widget | ⬜ Not Started | Depends on Story 7 |
-| 10 | Concurrent share management | ⬜ Not Started | Depends on Stories 7, 8, 9 |
-| 11 | Open draft PR for M3 | ⬜ Not Started | Depends on Stories 1-10 |
+| 2 | Fix tool output rendering in web UI | ✅ Complete | |
+| 3 | Copy context to clipboard (TUI) | ✅ Complete | |
+| 4 | Download session file | ✅ Complete | |
+| 5 | Parse Task tool for sub-agent tracking | ✅ Complete | |
+| 6 | Sub-agent flow visualization (web UI) | ✅ Complete | Depends on Story 5 |
+| 7 | Refactor sharing state for multiple shares | ✅ Complete | |
+| 8 | Share started modal with URL | ✅ Complete | Depends on Story 7 |
+| 9 | Shares panel widget | ✅ Complete | Depends on Story 7 |
+| 10 | Concurrent share management | ✅ Complete | Depends on Stories 7, 8, 9 |
+| 11 | Open draft PR for M3 | ✅ Complete | Depends on Stories 1-10 |
+| 12 | Add structured logging and diagnostics for sharing | ✅ Complete | |
+| 13 | Create MockTunnelProvider and E2E testing for multi-share | ⬜ Not Started | |
 
 ## Legend
 
@@ -54,6 +56,38 @@ Updated all "Agent Replay" references to "Panko":
 
 ---
 
+### 2026-01-30 - Story 12: Add Structured Logging and Diagnostics
+
+Added tracing-based logging infrastructure for sharing operations with configurable file output.
+
+**Files added/updated:**
+- `src/logging.rs` - New logging module with Verbosity enum and init functions
+- `src/lib.rs` - Added logging module export
+- `src/main.rs` - Added `-v/--verbose` CLI flag and logging initialization
+- `src/config.rs` - Added `log_file` config option with getter/setter
+- `src/tui/sharing.rs` - Added phase logging to sharing_thread() with timing spans
+- `src/tunnel/cloudflare.rs` - Log subprocess stderr instead of discarding
+- `src/tunnel/ngrok.rs` - Log subprocess stderr instead of discarding
+- `src/tunnel/tailscale.rs` - Log subprocess stderr instead of discarding
+
+**Features implemented:**
+- `tracing` and `tracing-subscriber` with file appender (already in Cargo.toml)
+- `log_file` config option in `~/.config/panko/config.toml`
+- Phase logging in sharing_thread(): runtime creation, session parsing, config loading, server start, tunnel spawn, URL received
+- Tunnel subprocess stderr captured and logged at trace level
+- Timing spans measuring each sharing phase duration (elapsed_ms field)
+- `--verbose` / `-v` CLI flag: `-v` for debug, `-vv` for trace level
+- TUI logging goes to file only (since stderr is used by TUI)
+
+**Validation results:**
+- ✅ `cargo build` - passes
+- ✅ `cargo test` - all tests pass (including 6 new config tests)
+- ✅ `cargo clippy` - no warnings
+- ✅ `cargo fmt --check` - properly formatted
+- ✅ CLI shows verbose flag in `--help` for all subcommands
+
+---
+
 ## Notes
 
 ### Story Dependencies
@@ -71,6 +105,10 @@ The milestone has two parallel tracks that can be worked independently:
 **Track C: Multi-Share (Stories 7-10)**
 - State refactor → modal → panel → concurrent management
 - Linear dependency chain
+
+**Track D: Observability & Testing (Stories 12-13)**
+- Structured logging and diagnostics
+- MockTunnelProvider and E2E tests
 
 **Final: Story 11**
 - PR depends on all other stories complete

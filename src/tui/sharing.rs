@@ -10,6 +10,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Instant;
 
+use tracing::{debug, error, info, info_span, warn};
+
 use crate::config::Config;
 use crate::parser::{ClaudeParser, SessionParser};
 use crate::server::{start_server, ServerConfig};
@@ -304,10 +306,31 @@ fn sharing_thread(
     message_tx: Sender<SharingMessage>,
     command_rx: Receiver<SharingCommand>,
 ) {
-    // Create a tokio runtime for async operations
+    let session_name = session_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let _span = info_span!("sharing", session = %session_name, provider = %provider_name).entered();
+    info!(
+        "Starting sharing thread for session: {}",
+        session_path.display()
+    );
+
+    // Phase 1: Create tokio runtime
+    let phase_start = Instant::now();
+    debug!("Phase 1: Creating tokio runtime");
     let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
+        Ok(rt) => {
+            debug!(
+                elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                "Runtime created successfully"
+            );
+            rt
+        }
         Err(e) => {
+            error!("Failed to create runtime: {}", e);
             let _ = message_tx.send(SharingMessage::Error {
                 message: format!("Failed to create runtime: {}", e),
             });
@@ -316,11 +339,22 @@ fn sharing_thread(
     };
 
     rt.block_on(async {
-        // Parse the session file
+        // Phase 2: Parse the session file
+        let phase_start = Instant::now();
+        debug!("Phase 2: Parsing session file");
         let parser = ClaudeParser::new();
         let session = match parser.parse(&session_path) {
-            Ok(s) => s,
+            Ok(s) => {
+                info!(
+                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                    blocks = s.blocks.len(),
+                    session_id = %s.id,
+                    "Session parsed successfully"
+                );
+                s
+            }
             Err(e) => {
+                error!("Failed to parse session: {}", e);
                 let _ = message_tx.send(SharingMessage::Error {
                     message: format!("Failed to parse session: {}", e),
                 });
@@ -328,15 +362,34 @@ fn sharing_thread(
             }
         };
 
-        // Load config for ngrok token and port
+        // Phase 3: Load configuration
+        let phase_start = Instant::now();
+        debug!("Phase 3: Loading configuration");
         let config = Config::load().unwrap_or_default();
         let ngrok_token = config.ngrok_token.as_deref();
         let port = config.effective_port(3000);
+        debug!(
+            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+            port = port,
+            has_ngrok_token = ngrok_token.is_some(),
+            "Configuration loaded"
+        );
 
-        // Get the tunnel provider
+        // Phase 4: Get the tunnel provider
+        let phase_start = Instant::now();
+        debug!("Phase 4: Getting tunnel provider");
         let provider = match get_provider_with_config(&provider_name, ngrok_token) {
-            Some(p) => p,
+            Some(p) => {
+                debug!(
+                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                    provider = p.name(),
+                    available = p.is_available(),
+                    "Got tunnel provider"
+                );
+                p
+            }
             None => {
+                error!("Unknown tunnel provider: {}", provider_name);
                 let _ = message_tx.send(SharingMessage::Error {
                     message: format!("Unknown provider: {}", provider_name),
                 });
@@ -344,15 +397,26 @@ fn sharing_thread(
             }
         };
 
-        // Start the local server
+        // Phase 5: Start the local server
+        let phase_start = Instant::now();
+        debug!("Phase 5: Starting local server");
         let server_config = ServerConfig {
             base_port: port,
             open_browser: false,
         };
 
         let server_handle = match start_server(session, server_config).await {
-            Ok(h) => h,
+            Ok(h) => {
+                info!(
+                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                    port = h.port(),
+                    url = %h.local_url(),
+                    "Local server started"
+                );
+                h
+            }
             Err(e) => {
+                error!("Failed to start server: {}", e);
                 let _ = message_tx.send(SharingMessage::Error {
                     message: format!("Failed to start server: {}", e),
                 });
@@ -362,10 +426,21 @@ fn sharing_thread(
 
         let actual_port = server_handle.port();
 
-        // Spawn the tunnel
+        // Phase 6: Spawn the tunnel
+        let phase_start = Instant::now();
+        debug!("Phase 6: Spawning tunnel");
         let mut tunnel_handle = match provider.spawn(actual_port) {
-            Ok(h) => h,
+            Ok(h) => {
+                info!(
+                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                    url = %h.url(),
+                    provider = h.provider_name(),
+                    "Tunnel spawned successfully"
+                );
+                h
+            }
             Err(e) => {
+                error!("Failed to start tunnel: {}", e);
                 server_handle.stop().await;
                 let _ = message_tx.send(SharingMessage::Error {
                     message: format!("Failed to start tunnel: {}", e),
@@ -376,17 +451,27 @@ fn sharing_thread(
 
         let public_url = tunnel_handle.url().to_string();
 
+        // Phase 7: URL received
+        info!(public_url = %public_url, "Share is now active");
+
         // Send the started message
-        let _ = message_tx.send(SharingMessage::Started { url: public_url });
+        let _ = message_tx.send(SharingMessage::Started {
+            url: public_url.clone(),
+        });
 
         // Wait for stop command (blocking wait)
         // This will block until we receive Stop command or the channel is closed
+        debug!("Waiting for stop command");
         let _ = command_rx.recv();
 
-        // Cleanup
-        let _ = tunnel_handle.stop();
+        // Phase 8: Cleanup
+        debug!("Received stop command, cleaning up");
+        if let Err(e) = tunnel_handle.stop() {
+            warn!("Error stopping tunnel: {}", e);
+        }
         server_handle.stop().await;
 
+        info!("Sharing stopped");
         let _ = message_tx.send(SharingMessage::Stopped);
     });
 }

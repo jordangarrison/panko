@@ -3,10 +3,12 @@
 //! Uses ngrok to create tunnels with both free and authenticated accounts.
 //! ngrok runs a local API on port 4040 that we query to get the public URL.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use tracing::{debug, trace};
 
 use super::{binary_exists, TunnelError, TunnelHandle, TunnelProvider, TunnelResult};
 
@@ -218,17 +220,26 @@ impl TunnelProvider for NgrokTunnel {
 
         match url {
             Some(url) => {
-                // Spawn a thread to keep draining stderr so ngrok doesn't block/die
-                // from SIGPIPE when it tries to write logs
+                // Spawn a thread to keep draining stderr and log it
+                // so ngrok doesn't block/die from SIGPIPE when it tries to write logs
                 if let Some(stderr) = stderr {
                     thread::spawn(move || {
                         let mut reader = std::io::BufReader::new(stderr);
-                        let mut buf = [0u8; 4096];
+                        let mut line = String::new();
                         loop {
-                            match reader.read(&mut buf) {
+                            line.clear();
+                            match reader.read_line(&mut line) {
                                 Ok(0) => break, // EOF
-                                Ok(_) => {}     // Discard the data
-                                Err(_) => break,
+                                Ok(_) => {
+                                    let trimmed = line.trim();
+                                    if !trimmed.is_empty() {
+                                        trace!(target: "ngrok", "{}", trimmed);
+                                    }
+                                }
+                                Err(e) => {
+                                    debug!("Error reading ngrok stderr: {}", e);
+                                    break;
+                                }
                             }
                         }
                     });

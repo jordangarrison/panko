@@ -2,10 +2,12 @@
 //!
 //! Uses cloudflared to create free quick tunnels without authentication.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use tracing::{debug, trace};
 
 use super::{binary_exists, TunnelError, TunnelHandle, TunnelProvider, TunnelResult};
 
@@ -146,15 +148,24 @@ impl TunnelProvider for CloudflareTunnel {
 
         match url {
             Some(url) => {
-                // Spawn a thread to keep draining stderr so cloudflared doesn't block/die
-                // from SIGPIPE when it tries to write logs
+                // Spawn a thread to keep draining stderr and log it
+                // so cloudflared doesn't block/die from SIGPIPE when it tries to write logs
                 thread::spawn(move || {
-                    let mut buf = [0u8; 4096];
+                    let mut line = String::new();
                     loop {
-                        match reader.read(&mut buf) {
+                        line.clear();
+                        match reader.read_line(&mut line) {
                             Ok(0) => break, // EOF
-                            Ok(_) => {}     // Discard the data
-                            Err(_) => break,
+                            Ok(_) => {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty() {
+                                    trace!(target: "cloudflared", "{}", trimmed);
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Error reading cloudflared stderr: {}", e);
+                                break;
+                            }
                         }
                     }
                 });

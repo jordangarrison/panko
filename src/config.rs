@@ -57,6 +57,11 @@ pub struct Config {
     /// Maximum number of concurrent shares allowed
     #[serde(default)]
     pub max_shares: Option<usize>,
+
+    /// Path to log file for diagnostics
+    /// If set, logs will be written to this file in addition to stderr (when verbose)
+    #[serde(default)]
+    pub log_file: Option<String>,
 }
 
 impl Config {
@@ -120,6 +125,7 @@ impl Config {
             && self.default_port.is_none()
             && self.default_sort.is_none()
             && self.max_shares.is_none()
+            && self.log_file.is_none()
     }
 
     /// Set the default tunnel provider
@@ -145,6 +151,11 @@ impl Config {
     /// Set the maximum number of concurrent shares
     pub fn set_max_shares(&mut self, max: Option<usize>) {
         self.max_shares = max;
+    }
+
+    /// Set the log file path
+    pub fn set_log_file(&mut self, path: Option<String>) {
+        self.log_file = path;
     }
 
     /// Get effective max shares (from config or default)
@@ -198,6 +209,12 @@ pub fn format_config(config: &Config) -> String {
         lines.push(format!("  max_shares = {}", max));
     } else {
         lines.push("  max_shares = (not set, using 5)".to_string());
+    }
+
+    if let Some(ref log_file) = config.log_file {
+        lines.push(format!("  log_file = \"{}\"", log_file));
+    } else {
+        lines.push("  log_file = (not set)".to_string());
     }
 
     lines.join("\n")
@@ -482,6 +499,55 @@ mod tests {
         assert!(config.is_empty());
 
         config.set_max_shares(Some(3));
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn test_log_file_getter_setter() {
+        let mut config = Config::new();
+        assert!(config.log_file.is_none());
+
+        config.set_log_file(Some("/tmp/panko.log".to_string()));
+        assert_eq!(config.log_file, Some("/tmp/panko.log".to_string()));
+
+        config.set_log_file(None);
+        assert!(config.log_file.is_none());
+    }
+
+    #[test]
+    fn test_log_file_serialization() {
+        let mut config = Config::new();
+        config.set_log_file(Some("/var/log/panko.log".to_string()));
+
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("log_file"));
+
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.log_file, Some("/var/log/panko.log".to_string()));
+    }
+
+    #[test]
+    fn test_format_config_with_log_file() {
+        let mut config = Config::new();
+        config.set_log_file(Some("/tmp/panko.log".to_string()));
+
+        let output = format_config(&config);
+        assert!(output.contains("log_file = \"/tmp/panko.log\""));
+    }
+
+    #[test]
+    fn test_format_config_without_log_file() {
+        let config = Config::new();
+        let output = format_config(&config);
+        assert!(output.contains("log_file = (not set)"));
+    }
+
+    #[test]
+    fn test_is_empty_with_only_log_file() {
+        let mut config = Config::new();
+        assert!(config.is_empty());
+
+        config.set_log_file(Some("/tmp/panko.log".to_string()));
         assert!(!config.is_empty());
     }
 }

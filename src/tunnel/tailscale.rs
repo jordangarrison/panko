@@ -4,10 +4,12 @@
 //! Note: Tailscale serve only shares within your tailnet (private network),
 //! not publicly on the internet like other tunnel providers.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
+
+use tracing::{debug, trace};
 
 use super::{binary_exists, TunnelError, TunnelHandle, TunnelProvider, TunnelResult};
 
@@ -208,16 +210,25 @@ impl TunnelProvider for TailscaleTunnel {
                 }
             }
             Ok(None) => {
-                // Process still running - spawn drain thread
+                // Process still running - spawn drain thread that logs output
                 if let Some(stderr) = stderr {
                     thread::spawn(move || {
                         let mut reader = BufReader::new(stderr);
-                        let mut buf = [0u8; 4096];
+                        let mut line = String::new();
                         loop {
-                            match reader.read(&mut buf) {
+                            line.clear();
+                            match reader.read_line(&mut line) {
                                 Ok(0) => break, // EOF
-                                Ok(_) => {}     // Discard the data
-                                Err(_) => break,
+                                Ok(_) => {
+                                    let trimmed = line.trim();
+                                    if !trimmed.is_empty() {
+                                        trace!(target: "tailscale", "{}", trimmed);
+                                    }
+                                }
+                                Err(e) => {
+                                    debug!("Error reading tailscale stderr: {}", e);
+                                    break;
+                                }
                             }
                         }
                     });
