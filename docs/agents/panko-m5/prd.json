@@ -23,7 +23,7 @@
       "title": "Implement SQLite persistence layer",
       "description": "Create database module for share state persistence",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/db.rs with Database struct",
         "Implement create_tables() for schema initialization",
