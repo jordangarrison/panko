@@ -55,7 +55,7 @@
       "title": "Implement share service",
       "description": "Port sharing logic from TUI threads to daemon service",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/share_service.rs with ShareService struct",
         "start_share() spawns server + tunnel, returns ShareInfo",

@@ -4,7 +4,8 @@
 //! Shares managed by the daemon persist across TUI restarts.
 
 use crate::daemon::db::{Database, DatabaseError};
-use crate::daemon::protocol::{DaemonRequest, DaemonResponse, ShareId, ShareInfo, ShareStatus};
+use crate::daemon::protocol::{DaemonRequest, DaemonResponse};
+use crate::daemon::share_service::{ShareService, ShareServiceError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -34,12 +35,15 @@ pub enum ServerError {
 
     #[error("Server shutdown")]
     Shutdown,
+
+    #[error("Share service error: {0}")]
+    ShareService(#[from] ShareServiceError),
 }
 
 /// Daemon server state
 pub struct DaemonServer {
-    /// Database handle for persistence (using std::sync::Mutex for rusqlite compatibility)
-    db: Arc<Mutex<Database>>,
+    /// Share service for managing shares
+    share_service: Arc<ShareService>,
     /// Path to Unix socket
     socket_path: PathBuf,
     /// Path to PID file
@@ -88,10 +92,13 @@ impl DaemonServer {
             None => Database::open_default()?,
         };
 
+        let db = Arc::new(Mutex::new(db));
+        let share_service = Arc::new(ShareService::with_db(db));
+
         let (shutdown_tx, _) = broadcast::channel(1);
 
         Ok(Self {
-            db: Arc::new(Mutex::new(db)),
+            share_service,
             socket_path,
             pid_path,
             shutdown_tx,
@@ -137,7 +144,7 @@ impl DaemonServer {
         };
 
         // Clone for the accept loop
-        let db = Arc::clone(&self.db);
+        let share_service = Arc::clone(&self.share_service);
         let socket_path = self.socket_path.clone();
         let pid_path = self.pid_path.clone();
         let mut shutdown_rx = self.shutdown_tx.subscribe();
@@ -151,11 +158,11 @@ impl DaemonServer {
                         match accept_result {
                             Ok((stream, _addr)) => {
                                 debug!("Accepted new connection");
-                                let db = Arc::clone(&db);
+                                let share_service = Arc::clone(&share_service);
                                 let mut conn_shutdown_rx = shutdown_rx.resubscribe();
 
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_connection(stream, db, &mut conn_shutdown_rx).await {
+                                    if let Err(e) = handle_connection(stream, share_service, &mut conn_shutdown_rx).await {
                                         match e {
                                             ServerError::Shutdown => {
                                                 debug!("Connection closed due to shutdown");
@@ -187,6 +194,9 @@ impl DaemonServer {
                 }
             }
 
+            // Stop all running shares before cleanup
+            share_service.stop_all_shares().await;
+
             // Cleanup
             cleanup_daemon(&socket_path, &pid_path);
             info!("Daemon stopped");
@@ -216,7 +226,7 @@ impl Default for DaemonServer {
 /// Handle a single client connection
 async fn handle_connection(
     stream: UnixStream,
-    db: Arc<Mutex<Database>>,
+    share_service: Arc<ShareService>,
     shutdown_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), ServerError> {
     let (reader, mut writer) = stream.into_split();
@@ -240,7 +250,7 @@ async fn handle_connection(
                         let response = match serde_json::from_str::<DaemonRequest>(&line) {
                             Ok(request) => {
                                 debug!("Received request: {:?}", request);
-                                handle_request(request, &db)
+                                handle_request(request, &share_service).await
                             }
                             Err(e) => {
                                 warn!("Failed to parse request: {}", e);
@@ -279,7 +289,10 @@ async fn handle_connection(
 }
 
 /// Handle a daemon request and return a response
-fn handle_request(request: DaemonRequest, db: &Arc<Mutex<Database>>) -> DaemonResponse {
+async fn handle_request(
+    request: DaemonRequest,
+    share_service: &Arc<ShareService>,
+) -> DaemonResponse {
     match request {
         DaemonRequest::Ping => {
             debug!("Handling Ping request");
@@ -293,7 +306,7 @@ fn handle_request(request: DaemonRequest, db: &Arc<Mutex<Database>>) -> DaemonRe
 
         DaemonRequest::ListShares => {
             debug!("Handling ListShares request");
-            match list_shares(db) {
+            match share_service.list_shares() {
                 Ok(shares) => DaemonResponse::ShareList(shares),
                 Err(e) => DaemonResponse::Error {
                     message: format!("Failed to list shares: {}", e),
@@ -309,9 +322,7 @@ fn handle_request(request: DaemonRequest, db: &Arc<Mutex<Database>>) -> DaemonRe
                 "Handling StartShare request for {:?} with provider {}",
                 session_path, provider
             );
-            // Note: Actual share starting will be implemented in share_service.rs
-            // For now, we create a placeholder share record
-            match start_share_placeholder(db, session_path, provider) {
+            match share_service.start_share(session_path, provider).await {
                 Ok(info) => DaemonResponse::ShareStarted(info),
                 Err(e) => DaemonResponse::Error {
                     message: format!("Failed to start share: {}", e),
@@ -321,7 +332,7 @@ fn handle_request(request: DaemonRequest, db: &Arc<Mutex<Database>>) -> DaemonRe
 
         DaemonRequest::StopShare { share_id } => {
             debug!("Handling StopShare request for {}", share_id);
-            match stop_share(db, share_id) {
+            match share_service.stop_share(share_id).await {
                 Ok(()) => DaemonResponse::ShareStopped { share_id },
                 Err(e) => DaemonResponse::Error {
                     message: format!("Failed to stop share: {}", e),
@@ -329,51 +340,6 @@ fn handle_request(request: DaemonRequest, db: &Arc<Mutex<Database>>) -> DaemonRe
             }
         }
     }
-}
-
-/// List all shares from the database
-fn list_shares(db: &Arc<Mutex<Database>>) -> Result<Vec<ShareInfo>, ServerError> {
-    let db = db.lock().map_err(|_| ServerError::LockError)?;
-    let shares = db.list_shares(None)?;
-    Ok(shares)
-}
-
-/// Create a placeholder share (actual implementation in share_service.rs)
-fn start_share_placeholder(
-    db: &Arc<Mutex<Database>>,
-    session_path: PathBuf,
-    provider: String,
-) -> Result<ShareInfo, ServerError> {
-    let session_name = session_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    let info = ShareInfo {
-        id: ShareId::new(),
-        session_path,
-        session_name,
-        public_url: "placeholder://pending".to_string(),
-        provider_name: provider,
-        local_port: 0,
-        started_at: chrono::Utc::now(),
-        status: ShareStatus::Starting,
-    };
-
-    {
-        let db = db.lock().map_err(|_| ServerError::LockError)?;
-        db.insert_share(&info)?;
-    }
-
-    Ok(info)
-}
-
-/// Stop a share
-fn stop_share(db: &Arc<Mutex<Database>>, share_id: ShareId) -> Result<(), ServerError> {
-    let db = db.lock().map_err(|_| ServerError::LockError)?;
-    db.update_share_status(share_id, ShareStatus::Stopped)?;
-    Ok(())
 }
 
 /// Clean up daemon files on shutdown
@@ -583,7 +549,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_start_share_placeholder() {
+    async fn test_server_start_share_invalid_session() {
         let temp_dir = TempDir::new().unwrap();
         let server = create_test_server(&temp_dir).await;
         let socket_path = server.socket_path().to_path_buf();
@@ -593,8 +559,9 @@ mod tests {
 
         let mut stream = UnixStream::connect(&socket_path).await.unwrap();
 
+        // Try to start a share with a non-existent session file
         let request = DaemonRequest::StartShare {
-            session_path: PathBuf::from("/test/session.jsonl"),
+            session_path: PathBuf::from("/nonexistent/session.jsonl"),
             provider: "cloudflare".to_string(),
         };
         let request_json = serde_json::to_string(&request).unwrap();
@@ -607,12 +574,15 @@ mod tests {
 
         let response: DaemonResponse = serde_json::from_str(&response_line).unwrap();
         match response {
-            DaemonResponse::ShareStarted(info) => {
-                assert_eq!(info.session_name, "session");
-                assert_eq!(info.provider_name, "cloudflare");
-                assert_eq!(info.status, ShareStatus::Starting);
+            DaemonResponse::Error { message } => {
+                // Should fail because session file doesn't exist
+                assert!(
+                    message.contains("Failed to start share"),
+                    "Expected parse error, got: {}",
+                    message
+                );
             }
-            _ => panic!("Expected ShareStarted response"),
+            _ => panic!("Expected Error response, got: {:?}", response),
         }
 
         handle.shutdown();
@@ -620,6 +590,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_stop_share() {
+        use crate::daemon::protocol::ShareId;
+
         let temp_dir = TempDir::new().unwrap();
         let server = create_test_server(&temp_dir).await;
         let socket_path = server.socket_path().to_path_buf();
@@ -627,28 +599,10 @@ mod tests {
         let handle = server.run().await.expect("Failed to start server");
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        // First, start a share
-        let mut stream = UnixStream::connect(&socket_path).await.unwrap();
+        // Create a share ID to stop (the share doesn't need to be running)
+        let share_id = ShareId::new();
 
-        let start_request = DaemonRequest::StartShare {
-            session_path: PathBuf::from("/test/session.jsonl"),
-            provider: "cloudflare".to_string(),
-        };
-        let request_json = serde_json::to_string(&start_request).unwrap();
-        stream.write_all(request_json.as_bytes()).await.unwrap();
-        stream.write_all(b"\n").await.unwrap();
-
-        let mut reader = BufReader::new(stream);
-        let mut response_line = String::new();
-        reader.read_line(&mut response_line).await.unwrap();
-
-        let response: DaemonResponse = serde_json::from_str(&response_line).unwrap();
-        let share_id = match response {
-            DaemonResponse::ShareStarted(info) => info.id,
-            _ => panic!("Expected ShareStarted response"),
-        };
-
-        // Now stop the share
+        // Try to stop the share (it doesn't exist but stop_share should still succeed)
         let mut stream = UnixStream::connect(&socket_path).await.unwrap();
 
         let stop_request = DaemonRequest::StopShare { share_id };
@@ -665,7 +619,7 @@ mod tests {
             DaemonResponse::ShareStopped { share_id: id } => {
                 assert_eq!(id, share_id);
             }
-            _ => panic!("Expected ShareStopped response"),
+            _ => panic!("Expected ShareStopped response, got: {:?}", response),
         }
 
         handle.shutdown();

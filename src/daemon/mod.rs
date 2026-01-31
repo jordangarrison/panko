@@ -6,7 +6,7 @@
 pub mod db;
 pub mod protocol;
 pub mod server;
+pub mod share_service;
 
 // Future modules (will be added in subsequent stories):
 // pub mod client;
-// pub mod share_service;

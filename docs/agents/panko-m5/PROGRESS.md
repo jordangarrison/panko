@@ -136,4 +136,63 @@ Created the daemon server that handles IPC communication via Unix sockets. The s
 
 ---
 
+## 2026-01-31: Story 4 - Implement share service
+
+### Summary
+Created the ShareService that ports sharing logic from TUI threads to the daemon. The service manages the lifecycle of shares by spawning server + tunnel processes and persisting state to SQLite.
+
+### Changes
+- Created `src/daemon/share_service.rs` with:
+  - `ShareService` struct managing shares with database and config
+  - `ShareServiceError` enum for typed error handling
+  - `start_share()` - Orchestrates full share startup:
+    1. Parses session file
+    2. Inserts share record in "Starting" status
+    3. Gets tunnel provider with config
+    4. Starts local HTTP server
+    5. Spawns tunnel process
+    6. Updates share with URL and "Active" status
+    7. Stores handles for later cleanup
+  - `stop_share()` - Gracefully stops shares:
+    1. Stops tunnel process
+    2. Stops HTTP server
+    3. Updates database status to "Stopped"
+  - `list_shares()`, `list_active_shares()`, `get_share()` for querying
+  - `is_share_running()`, `running_share_count()` for status
+  - `stop_all_shares()` for daemon shutdown
+  - `restore_on_startup()` - Marks orphaned shares as error on daemon restart
+  - `cleanup_old_shares()` - Removes old stopped/error shares
+
+- Updated `src/daemon/server.rs`:
+  - Added `ShareService` to `DaemonServer` struct
+  - Changed `handle_connection()` and `handle_request()` to use `ShareService`
+  - Made `handle_request()` async for async share operations
+  - Updated shutdown to call `stop_all_shares()` before cleanup
+  - Updated tests for new behavior
+
+- Updated `src/daemon/mod.rs` to export `share_service` module
+
+### Key Design Decisions
+- Uses `Arc<Mutex<Database>>` for database access (rusqlite compatibility)
+- Uses `RwLock<HashMap<ShareId, RunningShare>>` for active share handles
+- Config is loaded once at service creation
+- Tunnel provider configuration (ngrok_token, port) comes from config.toml
+- Share state persisted to SQLite at each lifecycle stage
+
+### Validation Results
+- [x] `cargo build` - PASSED
+- [x] `cargo test` - PASSED (643 tests)
+- [x] `cargo clippy` - PASSED (no warnings)
+- [x] `cargo fmt --check` - PASSED
+
+### Files Created
+- `src/daemon/share_service.rs`
+
+### Files Modified
+- `src/daemon/mod.rs`
+- `src/daemon/server.rs`
+- `docs/agents/panko-m5/prd.json`
+
+---
+
 <!-- Work entries will be added above as stories are completed -->
