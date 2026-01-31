@@ -45,6 +45,7 @@ pub fn get_shortcut_categories() -> Vec<ShortcutCategory> {
                 ("v / Enter", "View session"),
                 ("s", "Share session"),
                 ("c", "Copy session path"),
+                ("C", "Copy context to clipboard"),
                 ("o", "Open folder"),
                 ("d", "Delete session"),
                 ("r", "Refresh list"),

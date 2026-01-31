@@ -391,6 +391,12 @@ impl App {
             KeyCode::Char('S') => {
                 self.session_list_state.cycle_sort_order();
             }
+            // Copy context: C (shift+c) to copy session context to clipboard
+            KeyCode::Char('C') => {
+                if let Some(session) = self.selected_session() {
+                    self.pending_action = Action::CopyContext(session.path.clone());
+                }
+            }
             // Delete: d to delete selected session (with confirmation)
             KeyCode::Char('d') => {
                 // Cannot delete while sharing is active
@@ -1865,6 +1871,65 @@ mod tests {
         app.handle_key_event(key_event(KeyCode::Char('o'))).unwrap();
         assert!(app.has_pending_action());
         assert!(matches!(app.pending_action(), Action::OpenFolder(_)));
+    }
+
+    // Tests for copy context action (Shift+C)
+
+    #[test]
+    fn test_handle_key_shift_c_triggers_copy_context_on_session() {
+        let mut app = App::with_sessions(sample_sessions());
+        // Move to first session (first item is a project)
+        app.session_list_state_mut().select_next();
+
+        // Press 'C' (Shift+C) to copy context
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+
+        // Should have a pending CopyContext action
+        assert!(app.has_pending_action());
+        match app.pending_action() {
+            Action::CopyContext(path) => {
+                assert!(path.to_string_lossy().contains("abc12345.jsonl"));
+            }
+            _ => panic!("Expected CopyContext action"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_shift_c_does_nothing_on_project() {
+        let mut app = App::with_sessions(sample_sessions());
+        // First item is a project, not a session
+        assert!(app.selected_session().is_none());
+
+        // Press 'C' (Shift+C) on project
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+
+        // Should not have a pending action since we're on a project, not a session
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_handle_key_shift_c_does_nothing_when_empty() {
+        let mut app = App::new();
+
+        // Press 'C' (Shift+C) with no sessions
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+
+        // Should not have a pending action
+        assert!(!app.has_pending_action());
+    }
+
+    #[test]
+    fn test_copy_context_works_regardless_of_focus() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next();
+
+        // Switch to preview panel
+        app.set_focused_panel(FocusedPanel::Preview);
+
+        // Press 'C' (Shift+C) - should still work since we have a selected session
+        app.handle_key_event(key_event(KeyCode::Char('C'))).unwrap();
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::CopyContext(_)));
     }
 
     // Tests for fuzzy search

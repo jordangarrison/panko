@@ -42,7 +42,7 @@
       "title": "Copy context to clipboard (TUI)",
       "description": "Allow copying entire session context to clipboard for reuse in a new Claude Code session",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Shift+C on selected session triggers copy context",
         "Formats session as markdown: user prompts, assistant responses, key tool results",

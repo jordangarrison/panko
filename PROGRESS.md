@@ -1,5 +1,90 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 3: Copy context to clipboard (TUI)
+
+### Summary
+Implemented the ability to copy session context to clipboard for reuse in new Claude Code sessions. Users can press Shift+C on a selected session to copy a formatted markdown context including session metadata, user prompts, assistant responses, and summarized tool results.
+
+### Changes
+- Created `src/export/mod.rs`:
+  - New export module for session context formatting and export
+
+- Created `src/export/context.rs`:
+  - `ContextOptions` struct for configuring what to include in output
+  - `ContextFormat` result struct with content, message_count, and estimated_tokens
+  - `format_context()` function that formats a session as markdown
+  - `summarize_tool_input()` for tool-specific input summaries
+  - `summarize_tool_output()` for abbreviated tool results
+  - `truncate_str()` helper for word-boundary truncation
+  - `estimate_tokens()` for approximate token counting (~4 chars/token)
+  - 15 unit tests for context formatting
+
+- Updated `src/lib.rs`:
+  - Added `pub mod export;` to export the new module
+
+- Updated `src/tui/actions.rs`:
+  - Added `CopyContext(PathBuf)` variant to `Action` enum
+  - Added unit test for new action variant
+
+- Updated `src/tui/app.rs`:
+  - Added `KeyCode::Char('C')` handler for Shift+C
+  - Triggers `CopyContext` action with selected session path
+  - 4 new unit tests for copy context keybinding
+
+- Updated `src/tui/widgets/help.rs`:
+  - Added "C - Copy context to clipboard" to Actions section
+
+- Updated `src/main.rs`:
+  - Added import for `format_context` and `ContextOptions`
+  - Added handler for `CopyContext` action in `handle_tui_action()`
+  - Added `handle_copy_context()` helper function
+  - Shows confirmation message with message count and token estimate
+
+### Test Coverage (20 new tests)
+Context formatting tests:
+- `test_format_context_basic` - basic session formatting
+- `test_format_context_excludes_thinking_by_default` - thinking exclusion
+- `test_format_context_includes_thinking_when_enabled` - thinking inclusion
+- `test_format_context_tool_calls` - tool call formatting
+- `test_format_context_file_edit` - file edit formatting
+- `test_summarize_tool_input_read` - Read tool input summary
+- `test_summarize_tool_input_bash` - Bash tool input summary
+- `test_summarize_tool_input_bash_truncates` - long command truncation
+- `test_summarize_tool_output_string` - string output summary
+- `test_summarize_tool_output_object` - object output summary
+- `test_summarize_tool_output_array` - array output summary
+- `test_estimate_tokens` - token estimation
+- `test_truncate_str_short` - short string handling
+- `test_truncate_str_at_word` - word boundary truncation
+- `test_context_options_for_clipboard` - default options
+
+App keybinding tests:
+- `test_handle_key_shift_c_triggers_copy_context_on_session`
+- `test_handle_key_shift_c_does_nothing_on_project`
+- `test_handle_key_shift_c_does_nothing_when_empty`
+- `test_copy_context_works_regardless_of_focus`
+
+Action tests:
+- `test_action_copy_context`
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (443 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Shift+C on selected session triggers copy context
+- [x] Formats session as markdown: user prompts, assistant responses, key tool results
+- [x] Excludes verbose tool outputs (keeps summary only)
+- [x] Shows confirmation: 'Context copied (X messages, ~Y tokens)'
+- [x] Includes session metadata header (project, date)
+- [x] Clipboard content is paste-ready for Claude Code
+
+---
+
 ## 2026-01-30 - M3 Story 2: Fix tool output rendering in web UI
 
 ### Summary

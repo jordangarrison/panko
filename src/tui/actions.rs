@@ -11,6 +11,9 @@ pub enum Action {
     /// View a session in the web browser.
     /// The path is the session file to view.
     ViewSession(PathBuf),
+    /// Copy session context to clipboard for reuse.
+    /// The path is the session file to export context from.
+    CopyContext(PathBuf),
     /// Share a session via a public tunnel.
     /// This triggers provider detection and selection.
     ShareSession(PathBuf),
@@ -147,6 +150,16 @@ mod tests {
         match action {
             Action::DeleteSession(p) => assert_eq!(p, path),
             _ => panic!("Expected DeleteSession"),
+        }
+    }
+
+    #[test]
+    fn test_action_copy_context() {
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let action = Action::CopyContext(path.clone());
+        match action {
+            Action::CopyContext(p) => assert_eq!(p, path),
+            _ => panic!("Expected CopyContext"),
         }
     }
 }

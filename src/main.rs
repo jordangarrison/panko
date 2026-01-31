@@ -5,6 +5,7 @@ use inquire::Select;
 use std::path::{Path, PathBuf};
 
 use panko::config::{format_config, Config};
+use panko::export::{format_context, ContextOptions};
 use panko::parser::{ClaudeParser, SessionParser};
 use panko::server::{run_server, shutdown_signal, start_server, ServerConfig};
 use panko::tui;
@@ -568,6 +569,20 @@ fn handle_tui_action(
                 }
             }
         }
+        tui::Action::CopyContext(path) => {
+            // Copy session context to clipboard
+            match handle_copy_context(path) {
+                Ok((message_count, estimated_tokens)) => {
+                    app.set_status_message(format!(
+                        "✓ Context copied ({} messages, ~{} tokens)",
+                        message_count, estimated_tokens
+                    ));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("✗ Copy failed: {}", e));
+                }
+            }
+        }
         tui::Action::OpenFolder(path) => {
             // Open the containing folder in the system file manager
             if let Some(parent) = path.parent() {
@@ -666,6 +681,24 @@ fn wait_for_key(message: &str) {
 
     let stdin = io::stdin();
     let _ = stdin.lock().lines().next();
+}
+
+/// Handle copying session context to clipboard.
+///
+/// Parses the session, formats it as markdown context, and copies to clipboard.
+/// Returns the message count and estimated token count on success.
+fn handle_copy_context(path: &Path) -> Result<(usize, usize)> {
+    // Parse the session
+    let session = parse_session(path)?;
+
+    // Format as context
+    let options = ContextOptions::for_clipboard();
+    let context = format_context(&session, &options);
+
+    // Copy to clipboard
+    copy_to_clipboard(&context.content)?;
+
+    Ok((context.message_count, context.estimated_tokens))
 }
 
 /// Handle config subcommand
