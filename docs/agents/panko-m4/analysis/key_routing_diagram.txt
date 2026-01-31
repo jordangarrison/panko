@@ -1,0 +1,151 @@
+================================================================================
+CURRENT KEY EVENT ROUTING HIERARCHY (src/tui/app.rs handle_key_event)
+================================================================================
+
+                            KEY EVENT
+                                |
+                    ┌───────────┴───────────┐
+                    v                       v
+              Show Help?                NO  Done
+              │
+              ├─ Yes: Close help, return
+              │
+              v
+         Share Modal Showing?
+              │
+              ├─ Yes: handle_share_modal_key()
+              │       (can copy URL, any key closes)
+              │
+              v
+      Provider Selection Popup?
+              │
+              ├─ Yes: handle_provider_select_key()
+              │       (j/k to nav, Enter to select, Esc to cancel)
+              │
+              v
+    *** PROBLEM: Sharing Active? ***
+              │
+              ├─ Yes: handle_sharing_key()           ← LOCKS OUT MOST KEYS
+              │       ╔════════════════════════════════════════════╗
+              │       ║ Esc → Kill all shares (PROBLEM!)           ║
+              │       ║ q   → Kill all shares (PROBLEM!)           ║
+              │       ║ Ctrl+C → Kill all shares (PROBLEM!)        ║
+              │       ║ d   → Blocked (PROBLEM!)                   ║
+              │       ║ j/k → Navigate OK                          ║
+              │       ║ Tab → Switch panels OK                     ║
+              │       ║ S   → Toggle shares panel OK                ║
+              │       ║ s   → Start another share OK                ║
+              │       ║ _ → All other keys ignored                  ║
+              │       ╚════════════════════════════════════════════╝
+              │
+              ├─ No: continue
+              │
+              v
+       Shares Panel Showing?
+              │
+              ├─ Yes: handle_shares_panel_key()
+              │       ╔════════════════════════════════════════════╗
+              │       ║ j/k → Navigate shares                      ║
+              │       ║ Enter → Copy selected URL                  ║
+              │       ║ d   → Stop selected share (individual!)    ║
+              │       ║ Esc/S → Close panel                        ║
+              │       ║ q/Ctrl+C → Quit                            ║
+              │       ╚════════════════════════════════════════════╝
+              │
+              ├─ No: continue
+              │
+              v
+    Confirmation Dialog Showing?
+              │
+              ├─ Yes: handle_confirmation_key()
+              │
+              ├─ No: continue
+              │
+              v
+         Search Active?
+              │
+              ├─ Yes: handle_search_key()
+              │
+              ├─ No: continue
+              │
+              v
+         NORMAL KEY HANDLING
+              ╔════════════════════════════════════════════╗
+              ║ q → Quit                                   ║
+              ║ Ctrl+C → Quit                              ║
+              ║ Tab → Switch focus (list ↔ preview)       ║
+              ║ / → Activate search                        ║
+              ║ j/Down → Down (in session list)            ║
+              ║ k/Up → Up (in session list)                ║
+              ║ h/Left → Collapse (in session list)        ║
+              ║ l/Right → Expand (in session list)         ║
+              ║ g → First (in session list)                ║
+              ║ G → Last (in session list)                 ║
+              ║ v/Enter → View session                     ║
+              ║ s → Share session (start share)            ║
+              ║ c → Copy path                              ║
+              ║ o → Open folder                            ║
+              ║ r → Refresh                                ║
+              ║ S → Toggle shares panel                    ║
+              ║ C → Copy context                           ║
+              ║ D → Download                               ║
+              ║ d → Delete (with confirmation)             ║
+              ║ ? → Show help                              ║
+              ║ Esc → Quit (unless searching)              ║
+              ╚════════════════════════════════════════════╝
+
+================================================================================
+PROPOSED FIX: Move shares panel check BEFORE active sharing check
+================================================================================
+
+                            KEY EVENT
+                                |
+                    [... same checks until after provider select ...]
+                                |
+                                v
+                     Shares Panel Showing?
+                             │
+                             ├─ Yes: handle_shares_panel_key()  ← MOVED UP!
+                             │       (can manage shares)
+                             │
+                             ├─ No: continue
+                             │
+                             v
+                   *** Sharing Active? ***
+                             │
+                             ├─ Yes: handle_sharing_key()
+                             │       (MODIFIED - fewer restrictions)
+                             │       ╔════════════════════════════════════╗
+                             │       ║ Esc → No-op or close panel         ║
+                             │       ║ q   → Queue quit (don't kill share)║
+                             │       ║ Ctrl+C → Queue quit                ║
+                             │       ║ d   → Allow delete (with warning?) ║
+                             │       ║ j/k → Navigate OK                  ║
+                             │       ║ Tab → Switch panels OK              ║
+                             │       ║ S   → Toggle shares panel OK        ║
+                             │       ║ s   → Start another share OK        ║
+                             │       ║ c/o/v → Normal operations          ║
+                             │       ║ _   → Fall through to normal       ║
+                             │       ╚════════════════════════════════════╝
+                             │
+                             ├─ No: continue to normal handling
+                             │
+                             v
+                        Confirmation Dialog?
+                             │
+                             [... etc ...]
+
+================================================================================
+KEY INSIGHT: The shares panel gives FULL CONTROL over individual shares
+================================================================================
+
+The existing `handle_shares_panel_key()` already has everything needed:
+✓ Navigate through shares (j/k)
+✓ Copy individual share URLs (Enter)
+✓ Stop individual shares (d) via Action::StopShareById(id)
+✓ Close panel (Esc or Shift+S)
+
+The problem is it's unreachable when sharing_state.is_active() because that
+check happens first and returns early!
+
+Solution: Check show_shares_panel BEFORE checking sharing_state.is_active()

@@ -1,0 +1,304 @@
+================================================================================
+PANKO TUI SHARING STATE MACHINE - COMPLETE EXPLORATION SUMMARY
+================================================================================
+
+REQUESTED INFORMATION - ALL ADDRESSED:
+────────────────────────────────────────────────────────────────────────────
+
+1. ✓ How SharingState is defined (lines 48-100 in app.rs)
+   - Enum with 5 states: Inactive, SelectingProvider, Starting, Active, Stopping
+   - Tracks lifecycle of SINGLE share session (legacy design)
+   - Has helper methods: is_active(), is_selecting_provider(), is_busy(), public_url()
+
+2. ✓ How handle_key_event() routes to handle_sharing_key() (lines 350-352)
+   - Priority hierarchy: help → modal → provider_select → **SHARING_ACTIVE** → panel → confirm → search → normal
+   - Routing is: if self.sharing_state.is_active() { return self.handle_sharing_key(key) }
+   - This is the PROBLEM: it blocks all other handlers when sharing
+
+3. ✓ Full handle_sharing_key() function (lines 640-686)
+   - Esc/q/Ctrl+C → Action::StopSharing (kills all shares!)
+   - d → Blocked with message
+   - j/k/Tab/S/s → Limited allowed keys
+   - _ → All other keys ignored
+   - Missing: Most normal operations (view, copy, open, delete, navigate, etc.)
+
+4. ✓ How shares are tracked (src/tui/sharing.rs + app.rs fields 165-178)
+   - ShareManager holds Vec<ActiveShare> in active_shares
+   - Each ActiveShare has: id, session_path, public_url, provider_name, started_at
+   - ShareManager also tracks handles: HashMap<ShareId, SharingHandle>
+   - App has separate legacy field: sharing_state: SharingState (only one!)
+   - This is TWO SYSTEMS: legacy SharingState + modern ShareManager
+
+5. ✓ How shares panel works (lines 1011-1023 + 969-1008)
+   - toggle_shares_panel() toggles show_shares_panel boolean
+   - When shown: calls shares_panel_state.update(shares)
+   - handle_shares_panel_key() provides full control:
+     * Navigate (j/k/up/down)
+     * Copy URL (Enter)
+     * Stop individual share (d) via Action::StopShareById(id)
+     * Close (Esc/Shift+S)
+   - PROBLEM: Unreachable when sharing_state.is_active()
+
+6. ✓ How shares are stopped (src/tui/app.rs + actions.rs)
+   - Action::StopSharing → triggers StopSharing (kills all)
+   - Action::StopShareById(id) → targets individual share
+   - stop_share(id) → ShareManager.stop_share(id)
+   - ShareManager.stop_share() sends Stop command to background thread
+   - When handle count reaches 0: sharing_state = Inactive
+
+================================================================================
+STATE TRANSITION FLOWS
+================================================================================
+
+NORMAL FLOW: Starting a Share
+────────────────────────────
+User: 's' key
+      ↓
+App: pending_action = Action::ShareSession(path)
+      ↓
+Main loop detects action
+      ↓
+App: sharing_state = SelectingProvider
+App: render_provider_select_popup() shown
+      ↓
+User: j/k to navigate, Enter to select
+      ↓
+App: sharing_state = Starting
+App: pending_action = Action::StartSharing { path, provider }
+      ↓
+Main loop: SharingHandle::start() spawns background thread
+App: add_pending_share(id, path, provider)
+      ↓
+Background thread: Creates server, tunnel, sends Started message
+      ↓
+Main loop: process_share_messages()
+      ↓
+Message::Started received:
+  - Copy URL to clipboard
+  - share_manager.mark_started() → adds to active_shares
+  - sharing_state = Active
+  - show_share_modal()
+      ↓
+UI: Share modal shown (with URL, countdown to auto-dismiss)
+UI: shares_panel reflects share in ShareManager.active_shares
+      ↓
+PROBLEM STATE: sharing_state.is_active() = true
+  → handle_sharing_key() intercepts ALL KEYS
+  → Most operations blocked
+  → Can't normally navigate, delete, view, etc.
+
+CURRENT WORKAROUND FLOW: Managing Multiple Shares
+──────────────────────────────────────────────────
+While sharing_state.is_active():
+  ✓ User: 'S' (Shift+S) to toggle shares panel
+  ✓ App: show_shares_panel = true
+  ✓ User: j/k to navigate shares
+  ✓ User: d to stop selected share
+  ✓ App: pending_action = Action::StopShareById(id)
+  ✓ Main loop: app.stop_share(id)
+  ✓ ShareManager: removes the specific share
+  ✓ Background: sends Stop command to thread
+  ✓ If no shares remain: sharing_state = Inactive
+  ✓ User: 'S' to close panel
+
+PROBLEM: Can't access panel keys while sharing because:
+  → handle_key_event() checks is_active() BEFORE checking show_shares_panel
+  → if is_active() = true, returns early from handle_sharing_key()
+  → show_shares_panel check never reached
+
+================================================================================
+THE CORE ARCHITECTURAL PROBLEM
+================================================================================
+
+TWO SYSTEMS, ONE PURPOSE:
+
+LEGACY SYSTEM (SharingState enum):
+  - Designed for single share session
+  - Lives in app.sharing_state
+  - Tracks: Inactive → SelectingProvider → Starting → Active → Stopping
+  - When Active: LOCKS DOWN most keyboard input
+  - Used for UI state machine (showing/hiding popups)
+
+MODERN SYSTEM (ShareManager):
+  - Designed for multiple concurrent shares
+  - Lives in app.share_manager
+  - Can track 5 concurrent shares (configurable)
+  - Each has unique ShareId, URL, provider
+  - Background threads managed per-share
+  - Per-share stop commands (Action::StopShareById)
+
+CONFLICT:
+  - When ANY share is Active in legacy system:
+    sharing_state.is_active() = true
+  - This BLOCKS access to ShareManager controls
+  - Shares panel (which uses ShareManager) is unreachable
+  - Users can't manage individual shares during normal operations
+
+THE FIX:
+  - Move shares panel routing BEFORE active sharing check
+  - Reduce restrictions in handle_sharing_key()
+  - Allow most normal operations while sharing
+  - Only block dangerous operations (delete with confirmation)
+
+================================================================================
+DATA STRUCTURE RELATIONSHIPS
+================================================================================
+
+App
+├─ sharing_state: SharingState
+│  └─ Single session state (legacy)
+│
+├─ share_manager: ShareManager
+│  ├─ active_shares: Vec<ActiveShare>
+│  │  └─ Each has: id, session_path, public_url, provider_name, started_at
+│  │
+│  └─ handles: HashMap<ShareId, SharingHandle>
+│     └─ Background thread management
+│
+├─ show_shares_panel: bool
+│  └─ Controls visibility of shares panel
+│
+├─ shares_panel_state: SharesPanelState
+│  ├─ selected: usize
+│  ├─ list_state: ListState
+│  └─ share_count: usize
+│
+└─ share_modal_state: Option<ShareModalState>
+   └─ Shows when first share starts (auto-dismisses)
+
+ACTION DISPATCH:
+  Action::ShareSession → triggers provider selection
+  Action::StartSharing → spawns background thread
+  Action::StopSharing → stops all (legacy, rarely used now)
+  Action::StopShareById(id) → stops specific share (modern)
+  Action::CopyShareUrl → copies to clipboard
+
+================================================================================
+FILE LOCATIONS - QUICK REFERENCE
+================================================================================
+
+/home/jordangarrison/dev/jordangarrison/panko/src/tui/
+
+  app.rs (859 lines)
+    - Lines 48-100: SharingState enum definition
+    - Lines 333-489: handle_key_event() main router
+    - Lines 640-686: handle_sharing_key() (PROBLEM)
+    - Lines 969-1008: handle_shares_panel_key() (SOLUTION)
+    - Lines 1011-1023: toggle_shares_panel()
+    - Lines 1031-1035: selected_active_share()
+    - Lines 804-820: stop_share() and stop_all_shares()
+    - Lines 861-916: process_share_messages()
+
+  sharing.rs (849 lines)
+    - Lines 23-37: ShareId definition
+    - Lines 51-107: ActiveShare struct
+    - Lines 109-242: ShareManager struct
+    - Lines 311-491: sharing_thread() background function
+    - Tests: Lines 494-848
+
+  actions.rs (203 lines)
+    - Line 29: Action::StopSharing
+    - Line 49: Action::StopShareById(ShareId)
+
+  widgets/shares_panel.rs
+    - SharesPanelState: selection & navigation
+    - SharesPanel: rendering
+
+================================================================================
+SUGGESTED CHANGES FOR DESIRED UX
+================================================================================
+
+CHANGE 1: Reorder key routing checks (lines 354-357)
+  BEFORE:
+    if self.sharing_state.is_active() {
+        return self.handle_sharing_key(key_event);
+    }
+    if self.show_shares_panel {
+        return self.handle_shares_panel_key(key_event);
+    }
+
+  AFTER:
+    // Check shares panel FIRST (even while sharing)
+    if self.show_shares_panel {
+        return self.handle_shares_panel_key(key_event);
+    }
+    if self.sharing_state.is_active() {
+        return self.handle_sharing_key(key_event);
+    }
+
+CHANGE 2: Reduce restrictions in handle_sharing_key() (lines 640-686)
+  BEFORE:
+    - Esc → StopSharing (kills ALL)
+    - q/Ctrl+C → StopSharing (kills ALL)
+    - d → Blocked
+    - Most other keys → Ignored
+
+  AFTER:
+    - Esc → No-op (or close panel if open)
+    - q/Ctrl+C → Set quit flag (stop shares first via main loop)
+    - d → Allow delete (or block with message)
+    - Most navigation → Allow through to normal handling
+    - Other operations (c, o, v, r, etc.) → Allow through
+    - s → Allow start another share (already works)
+    - S → Toggle shares panel (already works)
+    - j/k → Keep for navigation
+
+  MECHANISM: Use fallthrough pattern
+    match key {
+        KeyCode::Char('S') => { self.toggle_shares_panel(); }
+        KeyCode::Char('s') => { /* start another share */ }
+        _ => { /* Fall through to normal handling */ }
+    }
+
+CHANGE 3: Update handle_sharing_key() to allow normal operations
+  Add these handlers:
+    - Navigation (j/k/h/l/g/G) → works if in session list
+    - View (v/Enter) → allowed
+    - Share (s) → already works
+    - Copy (c/C) → allowed
+    - Open folder (o) → allowed
+    - Download (D) → allowed
+    - Refresh (r) → allowed
+    - Help (?) → allowed
+    - Search (/) → allowed
+    - Tab → allowed (already works)
+
+RESULT:
+  - Normal workflow mostly works while sharing
+  - Share management is in Shift+S panel (intentional, focused interface)
+  - Escape doesn't nuke shares
+  - Can navigate, view, copy while shares are active
+  - Most operations don't interfere with sharing threads
+
+================================================================================
+VALIDATION CHECKLIST
+================================================================================
+
+These files are correctly understood:
+
+[✓] src/tui/app.rs
+    - SharingState (lines 48-100)
+    - handle_key_event() routing (lines 333-489)
+    - handle_sharing_key() handler (lines 640-686)
+    - handle_shares_panel_key() handler (lines 969-1008)
+    - toggle_shares_panel() (lines 1011-1023)
+    - stop_share() / stop_all_shares() (lines 804-820)
+    - process_share_messages() (lines 861-916)
+    - App struct fields (lines 153-178)
+
+[✓] src/tui/sharing.rs
+    - ShareId (lines 23-37)
+    - ActiveShare (lines 51-107)
+    - ShareManager (lines 109-242)
+    - SharingHandle (lines 272-309)
+    - sharing_thread() (lines 311-491)
+    - SharingMessage enum (lines 244-253)
+    - SharingCommand enum (lines 265-270)
+
+[✓] src/tui/actions.rs
+    - Action enum with StopSharing and StopShareById (lines 9-53)
+
+[✓] src/tui/widgets/shares_panel.rs
+    - SharesPanelState (lines 14-83)
+    - SharesPanel widget (lines 85-150+)
+

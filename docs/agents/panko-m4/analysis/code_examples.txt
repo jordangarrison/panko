@@ -1,0 +1,591 @@
+================================================================================
+PANKO SHARING STATE MACHINE - CODE EXAMPLES & SNIPPETS
+================================================================================
+
+1. SHARING STATE ENUM (app.rs, lines 48-75)
+────────────────────────────────────────────────────────────────────────────
+
+pub enum SharingState {
+    /// Not sharing anything.
+    #[default]
+    Inactive,
+    
+    /// Showing provider selection popup (path to share, available providers).
+    SelectingProvider {
+        /// The session file path to share.
+        session_path: PathBuf,
+    },
+    
+    /// Waiting for the sharing to start (server + tunnel).
+    Starting {
+        /// The session file path being shared.
+        session_path: PathBuf,
+        /// The selected provider name.
+        provider_name: String,
+    },
+    
+    /// Actively sharing with a public URL.
+    Active {
+        /// The public URL where the session is available.
+        public_url: String,
+        /// The provider being used.
+        provider_name: String,
+    },
+    
+    /// Stopping the sharing process.
+    Stopping,
+}
+
+impl SharingState {
+    pub fn is_active(&self) -> bool {
+        matches!(self, SharingState::Active { .. })
+    }
+    
+    pub fn is_busy(&self) -> bool {
+        !matches!(self, SharingState::Inactive)
+    }
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+2. ACTIVE SHARE STRUCT (sharing.rs, lines 51-107)
+────────────────────────────────────────────────────────────────────────────
+
+/// Information about an active share.
+#[derive(Debug, Clone)]
+pub struct ActiveShare {
+    /// Unique identifier for this share.
+    pub id: ShareId,
+    /// Path to the session file being shared.
+    pub session_path: PathBuf,
+    /// Public URL where the session is available.
+    pub public_url: String,
+    /// Name of the tunnel provider being used.
+    pub provider_name: String,
+    /// When this share was started.
+    pub started_at: Instant,
+}
+
+impl ActiveShare {
+    pub fn new(
+        id: ShareId,
+        session_path: PathBuf,
+        public_url: String,
+        provider_name: String,
+    ) -> Self {
+        Self {
+            id,
+            session_path,
+            public_url,
+            provider_name,
+            started_at: Instant::now(),
+        }
+    }
+
+    pub fn session_name(&self) -> &str {
+        self.session_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+    }
+
+    pub fn duration(&self) -> std::time::Duration {
+        self.started_at.elapsed()
+    }
+
+    pub fn duration_string(&self) -> String {
+        let secs = self.duration().as_secs();
+        if secs < 60 {
+            format!("{}s", secs)
+        } else if secs < 3600 {
+            format!("{}m {}s", secs / 60, secs % 60)
+        } else {
+            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+        }
+    }
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+3. SHARE MANAGER (sharing.rs, lines 109-242)
+────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Default)]
+pub struct ShareManager {
+    /// Active shares indexed by ID.
+    pub active_shares: Vec<ActiveShare>,
+    /// Handles for background sharing threads, indexed by share ID.
+    pub handles: HashMap<ShareId, SharingHandle>,
+    /// Maximum number of concurrent shares allowed.
+    pub max_shares: usize,
+}
+
+impl ShareManager {
+    pub fn new(max_shares: usize) -> Self {
+        Self {
+            active_shares: Vec::new(),
+            handles: HashMap::new(),
+            max_shares,
+        }
+    }
+
+    pub fn can_add_share(&self) -> bool {
+        self.active_shares.len() < self.max_shares
+    }
+
+    pub fn has_active_shares(&self) -> bool {
+        !self.active_shares.is_empty()
+    }
+
+    pub fn add_share(
+        &mut self,
+        session_path: PathBuf,
+        public_url: String,
+        provider_name: String,
+        handle: SharingHandle,
+    ) -> ShareId {
+        let id = ShareId::new();
+        let share = ActiveShare::new(id, session_path, public_url, provider_name);
+        self.active_shares.push(share);
+        self.handles.insert(id, handle);
+        id
+    }
+
+    pub fn mark_started(
+        &mut self,
+        id: ShareId,
+        session_path: PathBuf,
+        public_url: String,
+        provider_name: String,
+    ) {
+        let share = ActiveShare::new(id, session_path, public_url, provider_name);
+        self.active_shares.push(share);
+    }
+
+    /// Stop a share by ID.
+    pub fn stop_share(&mut self, id: ShareId) {
+        if let Some(handle) = self.handles.remove(&id) {
+            handle.stop();
+        }
+        self.active_shares.retain(|s| s.id != id);
+    }
+
+    /// Stop all shares.
+    pub fn stop_all(&mut self) {
+        for (_, handle) in self.handles.drain() {
+            handle.stop();
+        }
+        self.active_shares.clear();
+    }
+
+    pub fn poll_messages(&self) -> Vec<(ShareId, SharingMessage)> {
+        let mut messages = Vec::new();
+        for (&id, handle) in &self.handles {
+            while let Some(msg) = handle.try_recv() {
+                messages.push((id, msg));
+            }
+        }
+        messages
+    }
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+4. KEY EVENT ROUTING (app.rs, lines 333-489)
+────────────────────────────────────────────────────────────────────────────
+
+pub fn handle_key_event(&mut self, key_event: KeyEvent) -> AppResult<()> {
+    // Handle help overlay (any key closes it)
+    if self.show_help {
+        self.show_help = false;
+        return Ok(());
+    }
+
+    // Handle share modal (shown when sharing starts)
+    if self.is_share_modal_showing() {
+        return self.handle_share_modal_key(key_event);
+    }
+
+    // Route key events based on current state
+    if self.sharing_state.is_selecting_provider() {
+        return self.handle_provider_select_key(key_event);
+    }
+
+    // *** PROBLEM AREA: This check happens BEFORE shares panel check ***
+    if self.sharing_state.is_active() {
+        return self.handle_sharing_key(key_event);  // BLOCKS other handlers
+    }
+
+    // Handle shares panel (shown with Shift+S)
+    if self.show_shares_panel {
+        return self.handle_shares_panel_key(key_event);
+    }
+
+    // Handle confirmation dialog (delete confirmation)
+    if self.is_confirming() {
+        return self.handle_confirmation_key(key_event);
+    }
+
+    // Handle search mode input
+    if self.search_active {
+        return self.handle_search_key(key_event);
+    }
+
+    // Normal key handling
+    match key_event.code {
+        KeyCode::Char('q') => self.quit(),
+        KeyCode::Tab => self.focused_panel.toggle(),
+        KeyCode::Char('j') | KeyCode::Down if self.focused_panel == FocusedPanel::SessionList => {
+            self.session_list_state.select_next();
+        }
+        KeyCode::Char('k') | KeyCode::Up if self.focused_panel == FocusedPanel::SessionList => {
+            self.session_list_state.select_previous();
+        }
+        KeyCode::Char('s') => {
+            if let Some(session) = self.selected_session() {
+                self.pending_action = Action::ShareSession(session.path.clone());
+            }
+        }
+        KeyCode::Char('d') => {
+            if self.sharing_state.is_active() {
+                self.set_status_message("✗ Cannot delete while sharing is active");
+            } else if let Some(session) = self.selected_session() {
+                self.confirmation_state = ConfirmationState::ConfirmingDelete {
+                    session_path: session.path.clone(),
+                    session_id: session.id.clone(),
+                };
+            }
+        }
+        KeyCode::Char('S') => {
+            self.toggle_shares_panel();
+        }
+        KeyCode::Esc => {
+            if self.session_list_state.is_searching() {
+                self.clear_search();
+            } else {
+                self.quit();
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+5. HANDLE SHARING KEY - THE PROBLEM (app.rs, lines 640-686)
+────────────────────────────────────────────────────────────────────────────
+
+fn handle_sharing_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+    match key_event.code {
+        // Esc stops sharing (PROBLEM!)
+        KeyCode::Esc => {
+            self.sharing_state = SharingState::Stopping;
+            self.pending_action = Action::StopSharing;
+        }
+        // Quit also stops sharing (PROBLEM!)
+        KeyCode::Char('q') => {
+            self.sharing_state = SharingState::Stopping;
+            self.pending_action = Action::StopSharing;
+        }
+        KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+            self.sharing_state = SharingState::Stopping;
+            self.pending_action = Action::StopSharing;
+        }
+        // Delete is blocked while sharing
+        KeyCode::Char('d') => {
+            self.set_status_message("✗ Cannot delete while sharing is active");
+        }
+        // Navigation still works while sharing
+        KeyCode::Char('j') | KeyCode::Down
+            if self.focused_panel == FocusedPanel::SessionList =>
+        {
+            self.session_list_state.select_next();
+        }
+        KeyCode::Char('k') | KeyCode::Up if self.focused_panel == FocusedPanel::SessionList => {
+            self.session_list_state.select_previous();
+        }
+        KeyCode::Tab => {
+            self.focused_panel.toggle();
+        }
+        // Toggle shares panel with Shift+S
+        KeyCode::Char('S') => {
+            self.toggle_shares_panel();
+        }
+        // Allow starting another share while sharing is active
+        KeyCode::Char('s') => {
+            if let Some(session) = self.selected_session() {
+                self.pending_action = Action::ShareSession(session.path.clone());
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+6. HANDLE SHARES PANEL KEY - THE SOLUTION (app.rs, lines 969-1008)
+────────────────────────────────────────────────────────────────────────────
+
+fn handle_shares_panel_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+    match key_event.code {
+        // Navigation
+        KeyCode::Char('j') | KeyCode::Down => {
+            self.shares_panel_state.select_next();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            self.shares_panel_state.select_previous();
+        }
+        // Enter: copy selected share's URL
+        KeyCode::Enter => {
+            if let Some(share) = self.selected_active_share() {
+                self.pending_action = Action::CopyShareUrl(share.public_url.clone());
+                self.set_status_message("✓ URL copied to clipboard");
+            }
+        }
+        // d: stop selected share (INDIVIDUAL share, not all!)
+        KeyCode::Char('d') => {
+            if let Some(share) = self.selected_active_share() {
+                let id = share.id;
+                self.pending_action = Action::StopShareById(id);  // ← Per-share!
+            }
+        }
+        // Escape or Shift+S: close panel
+        KeyCode::Esc | KeyCode::Char('S') => {
+            self.show_shares_panel = false;
+        }
+        // Quit still works
+        KeyCode::Char('q') => {
+            self.show_shares_panel = false;
+            self.quit();
+        }
+        KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+            self.show_shares_panel = false;
+            self.quit();
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+7. TOGGLE SHARES PANEL (app.rs, lines 1011-1023)
+────────────────────────────────────────────────────────────────────────────
+
+pub fn toggle_shares_panel(&mut self) {
+    self.show_shares_panel = !self.show_shares_panel;
+    if self.show_shares_panel {
+        let shares = self.share_manager.shares();
+        tracing::info!(
+            share_count = shares.len(),
+            "toggle_shares_panel: Opening with {} shares",
+            shares.len()
+        );
+        // Update the shares panel state with current shares
+        self.shares_panel_state.update(shares);
+    }
+}
+
+pub fn selected_active_share(&self) -> Option<&crate::tui::sharing::ActiveShare> {
+    let shares = self.share_manager.shares();
+    let idx = self.shares_panel_state.selected();
+    shares.get(idx)
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+8. STOP SHARE METHODS (app.rs, lines 804-820)
+────────────────────────────────────────────────────────────────────────────
+
+pub fn stop_share(&mut self, id: ShareId) {
+    self.share_manager.stop_share(id);
+    // If this was the only share, clear the legacy sharing state
+    if !self.share_manager.has_active_shares() {
+        self.sharing_state = SharingState::Inactive;
+    }
+}
+
+pub fn stop_all_shares(&mut self) {
+    self.share_manager.stop_all();
+    self.sharing_state = SharingState::Inactive;
+    self.pending_share_id = None;
+    self.pending_share_path = None;
+    self.pending_share_provider = None;
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+9. PROCESS SHARE MESSAGES (app.rs, lines 861-916)
+────────────────────────────────────────────────────────────────────────────
+
+pub fn process_share_messages(&mut self) {
+    let messages = self.share_manager.poll_messages();
+    let mut shares_to_remove: Vec<ShareId> = Vec::new();
+
+    for (share_id, msg) in messages {
+        match msg {
+            SharingMessage::Started { url } => {
+                // Copy URL to clipboard
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_text(&url);
+                }
+                // Handle pending share state transitions
+                if let Some((pending_id, path, provider)) = self.take_pending_share() {
+                    if pending_id == share_id {
+                        let session_name = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        self.share_manager.mark_started(
+                            share_id,
+                            path,
+                            url.clone(),
+                            provider.clone(),
+                        );
+                        self.set_sharing_active(url.clone(), provider.clone());
+                        self.show_share_modal(session_name, url, provider);
+                    }
+                }
+            }
+            SharingMessage::Error { message } => {
+                tracing::error!(share_id = ?share_id, error = %message, "Share failed");
+                self.set_status_message(format!("Share failed: {}", message));
+                shares_to_remove.push(share_id);
+                if self.pending_share_id() == Some(share_id) {
+                    self.clear_sharing_state();
+                }
+            }
+            SharingMessage::Stopped => {
+                shares_to_remove.push(share_id);
+            }
+        }
+    }
+
+    for id in shares_to_remove {
+        self.share_manager.remove_handle(id);
+        if !self.share_manager.has_active_shares() {
+            self.clear_sharing_state();
+        }
+    }
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+10. ACTION ENUM (actions.rs, lines 9-53)
+────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Action {
+    /// View a session in the web browser.
+    ViewSession(PathBuf),
+    
+    /// Copy session context to clipboard for reuse.
+    CopyContext(PathBuf),
+    
+    /// Share a session via a public tunnel.
+    /// This triggers provider detection and selection.
+    ShareSession(PathBuf),
+    
+    /// Start sharing with a specific provider.
+    /// Used after the user selects a provider from the popup.
+    StartSharing {
+        path: PathBuf,
+        provider: String,
+    },
+    
+    /// Stop the current sharing session (LEGACY - stops all).
+    StopSharing,
+    
+    /// Sharing has started successfully.
+    SharingStarted {
+        url: String,
+        provider: String,
+    },
+    
+    /// Copy the session file path to clipboard.
+    CopyPath(PathBuf),
+    
+    /// Open the containing folder in the file manager.
+    OpenFolder(PathBuf),
+    
+    /// Delete a session file.
+    DeleteSession(PathBuf),
+    
+    /// Download a session file to ~/Downloads.
+    DownloadSession(PathBuf),
+    
+    /// Copy a URL to clipboard (used by share modal).
+    CopyShareUrl(String),
+    
+    /// Stop a specific share by its ID (MODERN - per-share).
+    StopShareById(crate::tui::sharing::ShareId),
+    
+    /// No action to perform.
+    #[default]
+    None,
+}
+
+────────────────────────────────────────────────────────────────────────────
+
+11. SHARES PANEL STATE (widgets/shares_panel.rs, lines 14-83)
+────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Default)]
+pub struct SharesPanelState {
+    /// Currently selected index in the shares list.
+    selected: usize,
+    /// List state for ratatui.
+    list_state: ListState,
+    /// Number of shares in the list (cached for bounds checking).
+    share_count: usize,
+}
+
+impl SharesPanelState {
+    pub fn new() -> Self {
+        Self {
+            selected: 0,
+            list_state: ListState::default(),
+            share_count: 0,
+        }
+    }
+
+    pub fn update(&mut self, shares: &[ActiveShare]) {
+        self.share_count = shares.len();
+        if shares.is_empty() {
+            self.selected = 0;
+            self.list_state.select(None);
+        } else {
+            // Clamp selection to valid range
+            if self.selected >= shares.len() {
+                self.selected = shares.len().saturating_sub(1);
+            }
+            self.list_state.select(Some(self.selected));
+        }
+    }
+
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    pub fn select_next(&mut self) {
+        if self.share_count > 0 {
+            self.selected = (self.selected + 1) % self.share_count;
+            self.list_state.select(Some(self.selected));
+        }
+    }
+
+    pub fn select_previous(&mut self) {
+        if self.share_count > 0 {
+            self.selected = if self.selected == 0 {
+                self.share_count - 1
+            } else {
+                self.selected - 1
+            };
+            self.list_state.select(Some(self.selected));
+        }
+    }
+}
+

@@ -1,0 +1,65 @@
+{
+  "name": "panko",
+  "branchName": "feature/sharing-ux-polish",
+  "description": "UX polish for sharing - deterministic controls, panel-based share management",
+  "stories": [
+    {
+      "id": "1",
+      "title": "Remove restrictive sharing key handler",
+      "description": "Remove the sharing_state.is_active() check that locks out normal controls. This check currently routes all keys to handle_sharing_key() which blocks most operations.",
+      "priority": 1,
+      "passes": false,
+      "acceptance_criteria": [
+        "Normal navigation (j/k) works while shares are active",
+        "View session (Enter) works while shares are active",
+        "Copy path (c) works while shares are active",
+        "Open folder (o) works while shares are active",
+        "Refresh (r) works while shares are active",
+        "Help (?) works while shares are active",
+        "Search (/) works while shares are active"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "2",
+      "title": "Block deleting shared sessions with message",
+      "description": "Add check to prevent deleting sessions that are currently being shared. Uses path-based check instead of legacy sharing_state.",
+      "priority": 2,
+      "passes": false,
+      "acceptance_criteria": [
+        "Add is_session_shared() helper to ShareManager",
+        "Delete handler checks if session is shared",
+        "Shared session shows 'Cannot delete: session is being shared' message",
+        "Non-shared sessions can still be deleted normally"
+      ],
+      "depends_on": ["1"]
+    },
+    {
+      "id": "3",
+      "title": "Escape no longer kills shares",
+      "description": "Remove Esc -> StopSharing behavior from main view. Shares should only be stopped from the Shares Panel.",
+      "priority": 3,
+      "passes": false,
+      "acceptance_criteria": [
+        "Pressing Esc in main view does not stop shares",
+        "Shares can only be stopped from Shares Panel (Shift+S)",
+        "Shares panel Esc closes panel but doesn't stop shares",
+        "Individual shares stopped with 'd' in shares panel"
+      ],
+      "depends_on": ["1"]
+    },
+    {
+      "id": "4",
+      "title": "Clean up legacy sharing state",
+      "description": "Remove or simplify handle_sharing_key() function since it's no longer needed after removing the routing check.",
+      "priority": 4,
+      "passes": false,
+      "acceptance_criteria": [
+        "handle_sharing_key() removed or minimized",
+        "No dead code warnings from clippy",
+        "All tests pass"
+      ],
+      "depends_on": ["1", "2", "3"]
+    }
+  ]
+}
