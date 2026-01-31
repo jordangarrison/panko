@@ -88,4 +88,52 @@ CREATE TABLE IF NOT EXISTS daemon_state (
 
 ---
 
+## 2026-01-31: Story 3 - Implement daemon server
+
+### Summary
+Created the daemon server that handles IPC communication via Unix sockets. The server accepts connections, handles JSON-framed requests, and dispatches to handlers for share lifecycle management.
+
+### Changes
+- Created `src/daemon/server.rs` with:
+  - `DaemonServer` struct managing socket, PID file, and database
+  - `DaemonHandle` for external control of the running server
+  - `ServerError` enum for typed error handling
+  - Unix socket binding at configurable path (default: `~/.local/share/panko/daemon.sock`)
+  - JSON-framed newline-delimited protocol handling
+  - Request dispatching for: `Ping`, `Shutdown`, `ListShares`, `StartShare`, `StopShare`
+  - Graceful shutdown via SIGTERM/SIGINT signals or IPC Shutdown command
+  - PID file management at configurable path (default: `~/.local/share/panko/daemon.pid`)
+  - Helper functions: `default_daemon_dir()`, `default_socket_path()`, `default_pid_path()`
+  - `is_daemon_running()` and `read_daemon_pid()` utility functions
+- Updated `src/daemon/mod.rs` to export the `server` module
+
+### Key Implementation Details
+- Uses `std::sync::Mutex` instead of `tokio::sync::RwLock` for database access (rusqlite Connection is not Send/Sync)
+- Connection handling spawns a new tokio task per client
+- Shutdown signal uses `tokio::sync::broadcast` channel for coordinated shutdown
+- Placeholder share implementation (actual server+tunnel spawning will be in share_service.rs)
+- Comprehensive test coverage including:
+  - Server creation and path configuration
+  - Run and shutdown lifecycle
+  - Ping/Pong communication
+  - ListShares (empty)
+  - StartShare placeholder
+  - StopShare
+  - Invalid request handling
+
+### Validation Results
+- [x] `cargo build` - PASSED
+- [x] `cargo test` - PASSED (632 tests, including 8 new server tests)
+- [x] `cargo clippy` - PASSED (no warnings)
+- [x] `cargo fmt --check` - PASSED
+
+### Files Created
+- `src/daemon/server.rs`
+
+### Files Modified
+- `src/daemon/mod.rs`
+- `docs/agents/panko-m5/prd.json`
+
+---
+
 <!-- Work entries will be added above as stories are completed -->

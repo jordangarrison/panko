@@ -39,7 +39,7 @@
       "title": "Implement daemon server",
       "description": "Create the main daemon process that handles IPC and manages shares",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/server.rs with DaemonServer struct",
         "Bind Unix socket at ~/.local/share/panko/daemon.sock",
