@@ -250,4 +250,58 @@ panko serve-status
 
 ---
 
+## 2026-01-31: Story 6 - Implement daemon client
+
+### Summary
+Created the `DaemonClient` struct that provides a high-level interface for the TUI to communicate with the background daemon process over Unix sockets.
+
+### Changes
+- Created `src/daemon/client.rs` with:
+  - `DaemonClient` struct wrapping buffered Unix socket reader/writer
+  - `ClientError` enum for typed error handling with variants:
+    - `ConnectionFailed` - socket connection errors
+    - `DaemonNotRunning` - daemon is not running
+    - `DaemonStartFailed` - failed to auto-start daemon
+    - `Io`, `Json` - standard IO/serialization errors
+    - `Timeout` - request timed out
+    - `DaemonError` - daemon returned an error response
+    - `UnexpectedResponse` - unexpected response type
+    - `ConnectionClosed` - connection closed by daemon
+  - `connect()` - connects to existing daemon at default socket path
+  - `connect_to()` - connects to existing daemon at specified path
+  - `connect_or_start()` - auto-starts daemon if not running, then connects
+  - `connect_or_start_with_path()` - same with custom socket path
+  - `ping()` - health check the daemon
+  - `start_share()` - start a new share for a session
+  - `stop_share()` - stop an existing share
+  - `list_shares()` - list all shares (active and inactive)
+  - `shutdown()` - request daemon shutdown
+  - `daemon_running()` - convenience function to check if daemon is running
+  - Private helpers: `start_daemon()`, `send_request()`, `send_request_with_timeout()`, `send_request_inner()`
+
+- Updated `src/daemon/mod.rs` to export the `client` module
+
+### Key Design Decisions
+- Uses `BufReader`/`BufWriter` for efficient buffered I/O
+- Default 30-second timeout for operations, configurable per-request
+- 5-second timeout for daemon startup with 100ms polling interval
+- Auto-start spawns `panko serve --foreground` as detached process
+- Connection retries during startup until socket becomes available
+- All methods take `&mut self` to maintain connection state
+
+### Validation Results
+- [x] `cargo build` - PASSED
+- [x] `cargo test` - PASSED (652 tests, including 9 new client tests)
+- [x] `cargo clippy` - PASSED (no warnings)
+- [x] `cargo fmt --check` - PASSED
+
+### Files Created
+- `src/daemon/client.rs`
+
+### Files Modified
+- `src/daemon/mod.rs`
+- `docs/agents/panko-m5/prd.json`
+
+---
+
 <!-- Work entries will be added above as stories are completed -->

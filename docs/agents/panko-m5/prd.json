@@ -87,7 +87,7 @@
       "title": "Implement daemon client",
       "description": "Create client library for TUI to communicate with daemon",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/client.rs with DaemonClient struct",
         "connect() connects to existing daemon socket",
