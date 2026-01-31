@@ -45,6 +45,8 @@ pub enum Action {
     DownloadSession(PathBuf),
     /// Copy a URL to clipboard (used by share modal).
     CopyShareUrl(String),
+    /// Stop a specific share by its ID.
+    StopShareById(crate::tui::sharing::ShareId),
     /// No action to perform.
     #[default]
     None,
@@ -184,6 +186,17 @@ mod tests {
         match action {
             Action::CopyShareUrl(u) => assert_eq!(u, url),
             _ => panic!("Expected CopyShareUrl"),
+        }
+    }
+
+    #[test]
+    fn test_action_stop_share_by_id() {
+        use crate::tui::sharing::ShareId;
+        let id = ShareId::new();
+        let action = Action::StopShareById(id);
+        match action {
+            Action::StopShareById(i) => assert_eq!(i, id),
+            _ => panic!("Expected StopShareById"),
         }
     }
 }

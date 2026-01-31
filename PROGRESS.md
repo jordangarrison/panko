@@ -1,5 +1,113 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 9: Shares panel widget
+
+### Summary
+Implemented a shares panel widget that displays all active shares with controls for navigation, URL copying, and stopping individual shares. The panel is toggled with Shift+S and shows session name, URL, provider, and duration for each active share.
+
+### Changes
+- Created `src/tui/widgets/shares_panel.rs`:
+  - `SharesPanelState` struct for managing selection state
+  - `update()` method to sync state with current shares
+  - `select_next()` and `select_previous()` for j/k navigation
+  - `SharesPanel` stateful widget implementing ratatui's `StatefulWidget`
+  - Renders centered popup with share list or empty state message
+  - Shows session name, provider, duration, and truncated URL for each share
+  - Keyboard hints at bottom: j/k navigate, Enter copies URL, d stops share, Esc/S closes
+  - 16 unit tests for state management and rendering
+
+- Updated `src/tui/widgets/mod.rs`:
+  - Added `mod shares_panel`
+  - Exported `SharesPanel`, `SharesPanelState`
+
+- Updated `src/tui/app.rs`:
+  - Added `show_shares_panel: bool` and `shares_panel_state: SharesPanelState` fields to `App`
+  - Added `toggle_shares_panel()` method that updates state with current shares
+  - Added `is_shares_panel_showing()` accessor
+  - Added `selected_active_share()` to get currently selected share
+  - Added `handle_shares_panel_key()` for panel-specific key handling:
+    - j/k or arrows: navigate shares list
+    - Enter: copy selected share's URL
+    - d: stop selected share
+    - Esc or Shift+S: close panel
+    - q or Ctrl+C: close panel and quit
+  - Updated `handle_key_event()` to route to shares panel handler when showing
+  - Changed Shift+S from cycling sort order to toggling shares panel
+  - Updated `render()` to render shares panel overlay
+  - Added `render_shares_panel()` method
+  - 13 new unit tests for shares panel integration
+
+- Updated `src/tui/actions.rs`:
+  - Added `StopShareById(ShareId)` action variant for stopping specific shares
+  - 1 new unit test
+
+- Updated `src/main.rs`:
+  - Added handler for `StopShareById` action
+  - Stops share by ID and updates panel state
+  - Closes panel automatically if no more shares
+
+- Updated `src/tui/widgets/help.rs`:
+  - Changed "S - Cycle sort order" to "S - Show active shares"
+
+### Test Coverage (30 new tests)
+SharesPanelState tests (in shares_panel.rs):
+- `test_shares_panel_state_new` - construction
+- `test_shares_panel_state_default` - default construction
+- `test_shares_panel_state_update_with_shares` - updating with shares
+- `test_shares_panel_state_update_empty` - updating with empty shares
+- `test_shares_panel_state_update_clamps_selection` - selection clamping
+- `test_shares_panel_state_select_next` - next navigation
+- `test_shares_panel_state_select_previous` - previous navigation
+- `test_shares_panel_state_select_next_empty` - empty list safety
+- `test_shares_panel_state_select_previous_empty` - empty list safety
+
+SharesPanel widget tests (in shares_panel.rs):
+- `test_shares_panel_widget_new` - widget creation
+- `test_shares_panel_widget_default` - default widget
+- `test_shares_panel_widget_with_block` - custom block
+- `test_shares_panel_widget_with_styles` - custom styles
+- `test_shares_panel_render_does_not_panic` - render safety
+- `test_shares_panel_render_empty_does_not_panic` - empty render
+- `test_shares_panel_render_small_area` - small terminal handling
+- `test_truncate_url_short` - short URL handling
+- `test_truncate_url_long` - long URL truncation
+- `test_truncate_url_very_short_max` - very short max width
+
+App shares panel tests (in app.rs):
+- `test_shares_panel_initially_not_showing` - default state
+- `test_toggle_shares_panel_on` - opening panel
+- `test_toggle_shares_panel_off` - closing panel
+- `test_handle_key_shift_s_toggles_shares_panel` - Shift+S key handling
+- `test_shares_panel_esc_closes` - Esc closes panel
+- `test_shares_panel_shift_s_closes` - Shift+S closes when open
+- `test_shares_panel_q_closes_and_quits` - q behavior
+- `test_shares_panel_navigation_j_k` - navigation keys
+- `test_shares_panel_enter_with_no_shares_does_nothing` - Enter on empty
+- `test_shares_panel_d_with_no_shares_does_nothing` - d on empty
+- `test_selected_active_share_none_when_empty` - empty share selection
+- `test_shares_panel_ctrl_c_closes_and_quits` - Ctrl+C behavior
+- `test_shares_panel_intercepts_normal_keys` - key interception
+
+Action tests:
+- `test_action_stop_share_by_id` - action variant
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (558 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] Shift+S toggles shares panel
+- [x] Lists: session name, URL, provider, duration
+- [x] j/k navigation, Enter copies URL, d stops share
+- [x] 'No active shares' when empty
+- [x] Esc/Shift+S dismisses
+
+---
+
 ## 2026-01-30 - M3 Story 8: Share started modal with URL
 
 ### Summary

@@ -5,7 +5,8 @@ use crate::tui::actions::Action;
 use crate::tui::sharing::{ShareId, ShareManager};
 use crate::tui::widgets::{
     ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
-    ProviderSelectState, SessionList, SessionListState, ShareModal, ShareModalState, SortOrder,
+    ProviderSelectState, SessionList, SessionListState, ShareModal, ShareModalState, SharesPanel,
+    SharesPanelState, SortOrder,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -171,6 +172,10 @@ pub struct App {
     pending_share_provider: Option<String>,
     /// State for the share started modal (shown when sharing starts)
     share_modal_state: Option<ShareModalState>,
+    /// Whether the shares panel is visible
+    show_shares_panel: bool,
+    /// State for the shares panel
+    shares_panel_state: SharesPanelState,
 }
 
 impl Default for App {
@@ -202,6 +207,8 @@ impl App {
             pending_share_path: None,
             pending_share_provider: None,
             share_modal_state: None,
+            show_shares_panel: false,
+            shares_panel_state: SharesPanelState::new(),
         }
     }
 
@@ -227,6 +234,8 @@ impl App {
             pending_share_path: None,
             pending_share_provider: None,
             share_modal_state: None,
+            show_shares_panel: false,
+            shares_panel_state: SharesPanelState::new(),
         }
     }
 
@@ -332,6 +341,11 @@ impl App {
             return self.handle_sharing_key(key_event);
         }
 
+        // Handle shares panel (shown with Shift+S)
+        if self.show_shares_panel {
+            return self.handle_shares_panel_key(key_event);
+        }
+
         // Handle confirmation dialog (delete confirmation)
         if self.is_confirming() {
             return self.handle_confirmation_key(key_event);
@@ -419,9 +433,9 @@ impl App {
             KeyCode::Char('r') => {
                 let _ = self.refresh_sessions();
             }
-            // Sort: S (shift+s) to cycle sort order
+            // Shares panel: S (shift+s) to toggle shares panel
             KeyCode::Char('S') => {
-                self.session_list_state.cycle_sort_order();
+                self.toggle_shares_panel();
             }
             // Copy context: C (shift+c) to copy session context to clipboard
             KeyCode::Char('C') => {
@@ -869,6 +883,69 @@ impl App {
         Ok(())
     }
 
+    /// Handle key events when the shares panel is showing.
+    fn handle_shares_panel_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
+        match key_event.code {
+            // Navigation
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.shares_panel_state.select_next();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.shares_panel_state.select_previous();
+            }
+            // Enter: copy selected share's URL
+            KeyCode::Enter => {
+                if let Some(share) = self.selected_active_share() {
+                    self.pending_action = Action::CopyShareUrl(share.public_url.clone());
+                    self.set_status_message("✓ URL copied to clipboard");
+                }
+            }
+            // d: stop selected share
+            KeyCode::Char('d') => {
+                if let Some(share) = self.selected_active_share() {
+                    let id = share.id;
+                    self.pending_action = Action::StopShareById(id);
+                }
+            }
+            // Escape or Shift+S: close panel
+            KeyCode::Esc | KeyCode::Char('S') => {
+                self.show_shares_panel = false;
+            }
+            // Quit still works
+            KeyCode::Char('q') => {
+                self.show_shares_panel = false;
+                self.quit();
+            }
+            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.show_shares_panel = false;
+                self.quit();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Toggle the shares panel visibility.
+    pub fn toggle_shares_panel(&mut self) {
+        self.show_shares_panel = !self.show_shares_panel;
+        if self.show_shares_panel {
+            // Update the shares panel state with current shares
+            self.shares_panel_state.update(self.share_manager.shares());
+        }
+    }
+
+    /// Check if the shares panel is showing.
+    pub fn is_shares_panel_showing(&self) -> bool {
+        self.show_shares_panel
+    }
+
+    /// Get the currently selected active share (for shares panel).
+    pub fn selected_active_share(&self) -> Option<&crate::tui::sharing::ActiveShare> {
+        let shares = self.share_manager.shares();
+        let idx = self.shares_panel_state.selected();
+        shares.get(idx)
+    }
+
     /// Remove a session from the list by its file path.
     pub fn remove_session_by_path(&mut self, path: &PathBuf) {
         self.session_list_state.remove_session_by_path(path);
@@ -921,10 +998,22 @@ impl App {
             self.render_help_overlay(frame, area);
         }
 
+        // Render shares panel if visible
+        if self.show_shares_panel {
+            self.render_shares_panel(frame, area);
+        }
+
         // Render share modal if visible (highest priority - on top of everything)
         if self.is_share_modal_showing() {
             self.render_share_modal(frame, area);
         }
+    }
+
+    /// Render the shares panel.
+    fn render_shares_panel(&mut self, frame: &mut Frame, area: Rect) {
+        let shares = self.share_manager.shares();
+        let widget = SharesPanel::new(shares);
+        frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
     }
 
     /// Render the share started modal.
@@ -3049,5 +3138,142 @@ mod tests {
         // Tick should not dismiss (modal just shown, hasn't timed out)
         app.tick();
         assert!(app.is_share_modal_showing());
+    }
+
+    // Shares panel tests
+
+    #[test]
+    fn test_shares_panel_initially_not_showing() {
+        let app = App::new();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_toggle_shares_panel_on() {
+        let mut app = App::new();
+        assert!(!app.is_shares_panel_showing());
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_toggle_shares_panel_off() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+        app.toggle_shares_panel();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_handle_key_shift_s_toggles_shares_panel() {
+        let mut app = App::new();
+        assert!(!app.is_shares_panel_showing());
+
+        // Open panel
+        app.handle_key_event(key_event(KeyCode::Char('S'))).unwrap();
+        assert!(app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_shares_panel_esc_closes() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_shares_panel_shift_s_closes() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event(KeyCode::Char('S'))).unwrap();
+        assert!(!app.is_shares_panel_showing());
+    }
+
+    #[test]
+    fn test_shares_panel_q_closes_and_quits() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event(KeyCode::Char('q'))).unwrap();
+        assert!(!app.is_shares_panel_showing());
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn test_shares_panel_navigation_j_k() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+
+        // Without shares, navigation should not crash
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        app.handle_key_event(key_event(KeyCode::Char('k'))).unwrap();
+        // Should still be showing and running
+        assert!(app.is_shares_panel_showing());
+        assert!(app.is_running());
+    }
+
+    #[test]
+    fn test_shares_panel_enter_with_no_shares_does_nothing() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+
+        // Enter on empty panel shouldn't create action
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.pending_action(), Action::None));
+    }
+
+    #[test]
+    fn test_shares_panel_d_with_no_shares_does_nothing() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+
+        // d on empty panel shouldn't create action
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+        assert!(matches!(app.pending_action(), Action::None));
+    }
+
+    #[test]
+    fn test_selected_active_share_none_when_empty() {
+        let app = App::new();
+        assert!(app.selected_active_share().is_none());
+    }
+
+    #[test]
+    fn test_shares_panel_ctrl_c_closes_and_quits() {
+        let mut app = App::new();
+        app.toggle_shares_panel();
+        assert!(app.is_shares_panel_showing());
+
+        app.handle_key_event(key_event_with_modifiers(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))
+        .unwrap();
+        assert!(!app.is_shares_panel_showing());
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn test_shares_panel_intercepts_normal_keys() {
+        let mut app = App::with_sessions(sample_sessions());
+        let initial_selected = app.session_list_state.selected();
+
+        // Open shares panel
+        app.toggle_shares_panel();
+
+        // Navigation keys should be intercepted by shares panel, not session list
+        app.handle_key_event(key_event(KeyCode::Down)).unwrap();
+        assert_eq!(app.session_list_state.selected(), initial_selected);
+
+        // j/k should also be intercepted
+        app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
+        assert_eq!(app.session_list_state.selected(), initial_selected);
     }
 }

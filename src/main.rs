@@ -684,6 +684,19 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
                 }
             }
         }
+        tui::Action::StopShareById(id) => {
+            // Stop a specific share by its ID
+            app.stop_share(*id);
+            // Update the shares panel state
+            if app.is_shares_panel_showing() {
+                let shares = app.share_manager().shares();
+                if shares.is_empty() {
+                    // Close panel if no more shares
+                    app.toggle_shares_panel();
+                }
+            }
+            app.set_status_message("✓ Share stopped");
+        }
         tui::Action::None => {
             // Nothing to do
         }
