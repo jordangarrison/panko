@@ -11,9 +11,14 @@ pub mod watcher;
 pub mod widgets;
 
 pub use actions::Action;
-pub use app::{App, AppResult, FocusedPanel, RefreshState, SharingState, MIN_HEIGHT, MIN_WIDTH};
+pub use app::{
+    App, AppResult, FocusedPanel, RefreshState, SharingState, DEFAULT_MAX_SHARES, MIN_HEIGHT,
+    MIN_WIDTH,
+};
 pub use events::{Event, EventHandler};
-pub use sharing::{SharingCommand, SharingHandle, SharingMessage};
+pub use sharing::{
+    ActiveShare, ShareId, ShareManager, ShareMessage, SharingCommand, SharingHandle, SharingMessage,
+};
 pub use watcher::{FileWatcher, WatcherMessage};
 pub use widgets::{ProviderOption, SessionList, SessionListState, SortOrder, TreeItem};
 

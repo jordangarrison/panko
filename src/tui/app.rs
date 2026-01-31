@@ -2,6 +2,7 @@
 
 use crate::scanner::{ScannerRegistry, SessionMeta};
 use crate::tui::actions::Action;
+use crate::tui::sharing::{ShareId, ShareManager};
 use crate::tui::widgets::{
     ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
     ProviderSelectState, SessionList, SessionListState, SortOrder,
@@ -12,6 +13,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use std::path::PathBuf;
+
+/// Default maximum number of concurrent shares.
+pub const DEFAULT_MAX_SHARES: usize = 5;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -145,7 +149,7 @@ pub struct App {
     search_active: bool,
     /// Pending action to be executed outside the TUI loop
     pending_action: Action,
-    /// Current sharing state
+    /// Current sharing state (for UI state transitions)
     sharing_state: SharingState,
     /// Provider selection state (when showing provider popup)
     provider_select_state: ProviderSelectState,
@@ -157,6 +161,14 @@ pub struct App {
     refresh_state: RefreshState,
     /// Current confirmation state (for delete dialog)
     confirmation_state: ConfirmationState,
+    /// Manager for multiple concurrent shares
+    share_manager: ShareManager,
+    /// The share ID currently being started (waiting for Started message)
+    pending_share_id: Option<ShareId>,
+    /// The session path for the pending share
+    pending_share_path: Option<PathBuf>,
+    /// The provider name for the pending share
+    pending_share_provider: Option<String>,
 }
 
 impl Default for App {
@@ -183,6 +195,10 @@ impl App {
             show_help: false,
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
+            share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            pending_share_id: None,
+            pending_share_path: None,
+            pending_share_provider: None,
         }
     }
 
@@ -203,6 +219,10 @@ impl App {
             show_help: false,
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
+            share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            pending_share_id: None,
+            pending_share_path: None,
+            pending_share_provider: None,
         }
     }
 
@@ -662,6 +682,67 @@ impl App {
     /// Clear the sharing state (after stopping).
     pub fn clear_sharing_state(&mut self) {
         self.sharing_state = SharingState::Inactive;
+        self.pending_share_id = None;
+        self.pending_share_path = None;
+        self.pending_share_provider = None;
+    }
+
+    /// Get a reference to the share manager.
+    pub fn share_manager(&self) -> &ShareManager {
+        &self.share_manager
+    }
+
+    /// Get a mutable reference to the share manager.
+    pub fn share_manager_mut(&mut self) -> &mut ShareManager {
+        &mut self.share_manager
+    }
+
+    /// Check if we can start a new share (not at max capacity).
+    pub fn can_add_share(&self) -> bool {
+        self.share_manager.can_add_share()
+    }
+
+    /// Get the number of active shares.
+    pub fn active_share_count(&self) -> usize {
+        self.share_manager.active_count()
+    }
+
+    /// Set the pending share info (when starting a new share).
+    pub fn set_pending_share(&mut self, id: ShareId, path: PathBuf, provider: String) {
+        self.pending_share_id = Some(id);
+        self.pending_share_path = Some(path);
+        self.pending_share_provider = Some(provider);
+    }
+
+    /// Get the pending share ID.
+    pub fn pending_share_id(&self) -> Option<ShareId> {
+        self.pending_share_id
+    }
+
+    /// Clear the pending share info and return the values.
+    pub fn take_pending_share(&mut self) -> Option<(ShareId, PathBuf, String)> {
+        let id = self.pending_share_id.take()?;
+        let path = self.pending_share_path.take()?;
+        let provider = self.pending_share_provider.take()?;
+        Some((id, path, provider))
+    }
+
+    /// Stop a share by ID.
+    pub fn stop_share(&mut self, id: ShareId) {
+        self.share_manager.stop_share(id);
+        // If this was the only share, clear the legacy sharing state
+        if !self.share_manager.has_active_shares() {
+            self.sharing_state = SharingState::Inactive;
+        }
+    }
+
+    /// Stop all active shares.
+    pub fn stop_all_shares(&mut self) {
+        self.share_manager.stop_all();
+        self.sharing_state = SharingState::Inactive;
+        self.pending_share_id = None;
+        self.pending_share_path = None;
+        self.pending_share_provider = None;
     }
 
     /// Set a status message to display in the footer.
@@ -2618,5 +2699,118 @@ mod tests {
                 assert!(!matches!(state, SharingState::Inactive));
             }
         }
+    }
+
+    // ShareManager integration tests
+
+    #[test]
+    fn test_app_share_manager_default() {
+        let app = App::new();
+        assert_eq!(app.share_manager().active_count(), 0);
+        assert!(!app.share_manager().has_active_shares());
+        assert!(app.can_add_share());
+    }
+
+    #[test]
+    fn test_app_active_share_count_initial() {
+        let app = App::new();
+        assert_eq!(app.active_share_count(), 0);
+    }
+
+    #[test]
+    fn test_app_can_add_share_initial() {
+        let app = App::new();
+        assert!(app.can_add_share());
+    }
+
+    #[test]
+    fn test_app_set_pending_share() {
+        let mut app = App::new();
+        let id = ShareId::new();
+        let path = PathBuf::from("/test/path.jsonl");
+        let provider = "cloudflare".to_string();
+
+        app.set_pending_share(id, path.clone(), provider.clone());
+
+        assert_eq!(app.pending_share_id(), Some(id));
+    }
+
+    #[test]
+    fn test_app_take_pending_share() {
+        let mut app = App::new();
+        let id = ShareId::new();
+        let path = PathBuf::from("/test/path.jsonl");
+        let provider = "cloudflare".to_string();
+
+        app.set_pending_share(id, path.clone(), provider.clone());
+
+        let result = app.take_pending_share();
+        assert!(result.is_some());
+
+        let (taken_id, taken_path, taken_provider) = result.unwrap();
+        assert_eq!(taken_id, id);
+        assert_eq!(taken_path, path);
+        assert_eq!(taken_provider, provider);
+
+        // Should be cleared now
+        assert_eq!(app.pending_share_id(), None);
+        assert!(app.take_pending_share().is_none());
+    }
+
+    #[test]
+    fn test_app_pending_share_id_none_initially() {
+        let app = App::new();
+        assert!(app.pending_share_id().is_none());
+    }
+
+    #[test]
+    fn test_app_stop_all_shares_clears_state() {
+        let mut app = App::new();
+
+        // Set some state
+        app.set_sharing_active("https://test.com".into(), "ngrok".into());
+        let id = ShareId::new();
+        app.set_pending_share(id, PathBuf::from("/test.jsonl"), "ngrok".into());
+
+        // Stop all shares
+        app.stop_all_shares();
+
+        // Verify state is cleared
+        assert!(!app.sharing_state().is_active());
+        assert!(app.pending_share_id().is_none());
+        assert!(!app.share_manager().has_active_shares());
+    }
+
+    #[test]
+    fn test_app_clear_sharing_state_clears_pending() {
+        let mut app = App::new();
+
+        let id = ShareId::new();
+        app.set_pending_share(id, PathBuf::from("/test.jsonl"), "cloudflare".into());
+        app.set_sharing_active("https://test.com".into(), "cloudflare".into());
+
+        app.clear_sharing_state();
+
+        // Pending share should be cleared
+        assert!(app.pending_share_id().is_none());
+        // Sharing state should be inactive
+        assert!(!app.sharing_state().is_active());
+    }
+
+    #[test]
+    fn test_app_share_manager_mut_allows_modification() {
+        let mut app = App::new();
+
+        // Mark a share as started
+        let id = ShareId::new();
+        app.share_manager_mut().mark_started(
+            id,
+            PathBuf::from("/test.jsonl"),
+            "https://test.com".into(),
+            "cloudflare".into(),
+        );
+
+        assert_eq!(app.active_share_count(), 1);
+        assert!(app.share_manager().has_active_shares());
     }
 }

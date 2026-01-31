@@ -1,5 +1,102 @@
 # Panko Progress Log
 
+## 2026-01-30 - M3 Story 7: Refactor sharing state for multiple shares
+
+### Summary
+Refactored the sharing infrastructure to support multiple concurrent shares. The single `SharingState` is now augmented with a `ShareManager` that tracks multiple `ActiveShare` instances, each with its own `ShareId` for identification and management.
+
+### Changes
+- Updated `src/tui/sharing.rs`:
+  - Added `ShareId` struct with unique ID generation via atomic counter
+  - Added `ActiveShare` struct with id, session_path, public_url, provider_name, started_at
+  - Added `ShareManager` struct for managing multiple concurrent shares
+  - ShareManager tracks `active_shares: Vec<ActiveShare>` and `handles: HashMap<ShareId, SharingHandle>`
+  - Added methods: `can_add_share()`, `add_share()`, `add_pending_share()`, `mark_started()`, `stop_share()`, `stop_all()`, `poll_messages()`, `remove_handle()`
+  - Added `ShareMessage` struct for messages with share ID
+  - Added `duration_string()` helper for human-readable durations
+  - 22 new unit tests for ShareId, ActiveShare, and ShareManager
+
+- Updated `src/tui/app.rs`:
+  - Added `share_manager: ShareManager` field to `App` struct
+  - Added `pending_share_id`, `pending_share_path`, `pending_share_provider` fields for tracking shares being started
+  - Added `DEFAULT_MAX_SHARES` constant (default: 5)
+  - Added accessor methods: `share_manager()`, `share_manager_mut()`, `can_add_share()`, `active_share_count()`
+  - Added pending share methods: `set_pending_share()`, `pending_share_id()`, `take_pending_share()`
+  - Added `stop_share()` and `stop_all_shares()` methods
+  - Updated `clear_sharing_state()` to also clear pending share info
+  - 9 new unit tests for ShareManager integration
+
+- Updated `src/tui/mod.rs`:
+  - Exported `ActiveShare`, `ShareId`, `ShareManager`, `ShareMessage` types
+  - Exported `DEFAULT_MAX_SHARES` constant
+
+- Updated `src/main.rs`:
+  - Removed standalone `sharing_handle: Option<SharingHandle>` tracking
+  - Added `process_sharing_messages()` function to poll all share handles
+  - Updated `handle_tui_action()` to use ShareManager for starting shares
+  - Updated `ShareSession` action to check `can_add_share()` before starting
+  - Updated `StopSharing` action to call `stop_all_shares()`
+  - User quit and error handling now call `app.stop_all_shares()`
+
+### Test Coverage (31 new tests)
+ShareId tests:
+- `test_share_id_new_unique` - unique ID generation
+- `test_share_id_display` - display formatting
+- `test_share_id_as_u64` - numeric value access
+- `test_share_id_eq_and_hash` - equality and hashing
+- `test_share_id_copy_clone` - copy/clone semantics
+
+ActiveShare tests:
+- `test_active_share_new` - construction
+- `test_active_share_session_name` - filename extraction
+- `test_active_share_session_name_no_extension` - handle no extension
+- `test_active_share_duration` - duration tracking
+- `test_active_share_duration_string` - human-readable duration
+
+ShareManager tests:
+- `test_share_manager_new` - construction with max
+- `test_share_manager_default` - default construction
+- `test_share_manager_can_add_share` - capacity checking
+- `test_share_manager_active_count` - active share counting
+- `test_share_manager_has_active_shares` - active share detection
+- `test_share_manager_shares_empty` - empty shares list
+- `test_share_manager_get_share_none` - get missing share
+- `test_share_manager_get_handle_none` - get missing handle
+- `test_share_manager_poll_messages_empty` - poll with no handles
+- `test_share_manager_mark_started` - marking share as started
+- `test_share_manager_stop_all` - stopping all shares
+- `test_share_message_debug` - ShareMessage debug
+
+App ShareManager tests:
+- `test_app_share_manager_default` - default ShareManager in App
+- `test_app_active_share_count_initial` - initial count is 0
+- `test_app_can_add_share_initial` - initially can add shares
+- `test_app_set_pending_share` - setting pending share
+- `test_app_take_pending_share` - taking pending share
+- `test_app_pending_share_id_none_initially` - no pending initially
+- `test_app_stop_all_shares_clears_state` - stop all clears state
+- `test_app_clear_sharing_state_clears_pending` - clear also clears pending
+- `test_app_share_manager_mut_allows_modification` - mutable access
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (501 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Acceptance Criteria
+- [x] New ActiveShare struct: id, session_path, public_url, provider_name, started_at
+- [x] App.active_shares: Vec<ActiveShare> replaces single state (via ShareManager)
+- [x] App.sharing_handles: HashMap<ShareId, SharingHandle> for handles (via ShareManager)
+- [x] Unique ShareId per share
+- [x] Single-share flow still works (pressing 's')
+- [x] Can stop individual shares by ID
+- [x] Unit tests for new structures
+
+---
+
 ## 2026-01-30 - M3 Story 6: Sub-agent flow visualization (web UI)
 
 ### Summary

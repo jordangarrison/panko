@@ -1,16 +1,234 @@
 //! Background sharing management for TUI.
 //!
 //! This module provides functionality for managing sharing sessions in the background
-//! while the TUI continues to run.
+//! while the TUI continues to run. Supports multiple concurrent shares.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::Instant;
 
 use crate::config::Config;
 use crate::parser::{ClaudeParser, SessionParser};
 use crate::server::{start_server, ServerConfig};
 use crate::tunnel::get_provider_with_config;
+
+// Global counter for generating unique share IDs
+static SHARE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Unique identifier for a sharing session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ShareId(u64);
+
+impl ShareId {
+    /// Generate a new unique share ID.
+    pub fn new() -> Self {
+        Self(SHARE_ID_COUNTER.fetch_add(1, Ordering::SeqCst))
+    }
+
+    /// Get the numeric value of this ID.
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl Default for ShareId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for ShareId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "share-{}", self.0)
+    }
+}
+
+/// Information about an active share.
+#[derive(Debug, Clone)]
+pub struct ActiveShare {
+    /// Unique identifier for this share.
+    pub id: ShareId,
+    /// Path to the session file being shared.
+    pub session_path: PathBuf,
+    /// Public URL where the session is available.
+    pub public_url: String,
+    /// Name of the tunnel provider being used.
+    pub provider_name: String,
+    /// When this share was started.
+    pub started_at: Instant,
+}
+
+impl ActiveShare {
+    /// Create a new active share.
+    pub fn new(
+        id: ShareId,
+        session_path: PathBuf,
+        public_url: String,
+        provider_name: String,
+    ) -> Self {
+        Self {
+            id,
+            session_path,
+            public_url,
+            provider_name,
+            started_at: Instant::now(),
+        }
+    }
+
+    /// Get the session filename (without path).
+    pub fn session_name(&self) -> &str {
+        self.session_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+    }
+
+    /// Get the duration since this share started.
+    pub fn duration(&self) -> std::time::Duration {
+        self.started_at.elapsed()
+    }
+
+    /// Format the duration as a human-readable string.
+    pub fn duration_string(&self) -> String {
+        let secs = self.duration().as_secs();
+        if secs < 60 {
+            format!("{}s", secs)
+        } else if secs < 3600 {
+            format!("{}m {}s", secs / 60, secs % 60)
+        } else {
+            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+        }
+    }
+}
+
+/// Container for managing multiple concurrent shares.
+#[derive(Debug, Default)]
+pub struct ShareManager {
+    /// Active shares indexed by ID.
+    pub active_shares: Vec<ActiveShare>,
+    /// Handles for background sharing threads, indexed by share ID.
+    pub handles: HashMap<ShareId, SharingHandle>,
+    /// Maximum number of concurrent shares allowed.
+    pub max_shares: usize,
+}
+
+impl ShareManager {
+    /// Create a new share manager with the given maximum concurrent shares.
+    pub fn new(max_shares: usize) -> Self {
+        Self {
+            active_shares: Vec::new(),
+            handles: HashMap::new(),
+            max_shares,
+        }
+    }
+
+    /// Check if we can start a new share.
+    pub fn can_add_share(&self) -> bool {
+        self.active_shares.len() < self.max_shares
+    }
+
+    /// Get the number of active shares.
+    pub fn active_count(&self) -> usize {
+        self.active_shares.len()
+    }
+
+    /// Check if there are any active shares.
+    pub fn has_active_shares(&self) -> bool {
+        !self.active_shares.is_empty()
+    }
+
+    /// Add a new share. Returns the share ID.
+    pub fn add_share(
+        &mut self,
+        session_path: PathBuf,
+        public_url: String,
+        provider_name: String,
+        handle: SharingHandle,
+    ) -> ShareId {
+        let id = ShareId::new();
+        let share = ActiveShare::new(id, session_path, public_url, provider_name);
+        self.active_shares.push(share);
+        self.handles.insert(id, handle);
+        id
+    }
+
+    /// Add a pending share (before URL is known). Returns the share ID.
+    /// The share will be updated with URL when Started message is received.
+    pub fn add_pending_share(
+        &mut self,
+        id: ShareId,
+        _session_path: PathBuf,
+        _provider_name: String,
+        handle: SharingHandle,
+    ) {
+        // Don't add to active_shares yet - wait for Started message
+        self.handles.insert(id, handle);
+    }
+
+    /// Mark a pending share as started with the given URL.
+    pub fn mark_started(
+        &mut self,
+        id: ShareId,
+        session_path: PathBuf,
+        public_url: String,
+        provider_name: String,
+    ) {
+        let share = ActiveShare::new(id, session_path, public_url, provider_name);
+        self.active_shares.push(share);
+    }
+
+    /// Stop a share by ID.
+    pub fn stop_share(&mut self, id: ShareId) {
+        if let Some(handle) = self.handles.remove(&id) {
+            handle.stop();
+        }
+        self.active_shares.retain(|s| s.id != id);
+    }
+
+    /// Stop all shares.
+    pub fn stop_all(&mut self) {
+        for (_, handle) in self.handles.drain() {
+            handle.stop();
+        }
+        self.active_shares.clear();
+    }
+
+    /// Get a share by ID.
+    pub fn get_share(&self, id: ShareId) -> Option<&ActiveShare> {
+        self.active_shares.iter().find(|s| s.id == id)
+    }
+
+    /// Get all active shares.
+    pub fn shares(&self) -> &[ActiveShare] {
+        &self.active_shares
+    }
+
+    /// Get a handle by ID.
+    pub fn get_handle(&self, id: ShareId) -> Option<&SharingHandle> {
+        self.handles.get(&id)
+    }
+
+    /// Try to receive messages from all handles.
+    /// Returns a list of (ShareId, SharingMessage) pairs.
+    pub fn poll_messages(&self) -> Vec<(ShareId, SharingMessage)> {
+        let mut messages = Vec::new();
+        for (&id, handle) in &self.handles {
+            while let Some(msg) = handle.try_recv() {
+                messages.push((id, msg));
+            }
+        }
+        messages
+    }
+
+    /// Remove handle for a share (when it has stopped).
+    pub fn remove_handle(&mut self, id: ShareId) {
+        self.handles.remove(&id);
+        self.active_shares.retain(|s| s.id != id);
+    }
+}
 
 /// Messages sent from the sharing background thread to the TUI.
 #[derive(Debug)]
@@ -21,6 +239,16 @@ pub enum SharingMessage {
     Error { message: String },
     /// Sharing has stopped.
     Stopped,
+}
+
+/// Extended sharing message that includes the share ID.
+/// Used when polling messages from the ShareManager.
+#[derive(Debug)]
+pub struct ShareMessage {
+    /// The share ID this message relates to.
+    pub share_id: ShareId,
+    /// The actual message content.
+    pub message: SharingMessage,
 }
 
 /// Messages sent from the TUI to the sharing background thread.
@@ -285,5 +513,236 @@ mod tests {
         // Test command can be created and matched
         let cmd = SharingCommand::Stop;
         assert!(matches!(cmd, SharingCommand::Stop));
+    }
+
+    // ShareId tests
+
+    #[test]
+    fn test_share_id_new_unique() {
+        let id1 = ShareId::new();
+        let id2 = ShareId::new();
+        let id3 = ShareId::new();
+
+        assert_ne!(id1, id2);
+        assert_ne!(id2, id3);
+        assert_ne!(id1, id3);
+    }
+
+    #[test]
+    fn test_share_id_display() {
+        let id = ShareId::new();
+        let display = format!("{}", id);
+        assert!(display.starts_with("share-"));
+    }
+
+    #[test]
+    fn test_share_id_as_u64() {
+        let id = ShareId::new();
+        let value = id.as_u64();
+        assert!(value > 0);
+    }
+
+    #[test]
+    fn test_share_id_eq_and_hash() {
+        use std::collections::HashSet;
+
+        let id1 = ShareId::new();
+        let id2 = ShareId::new();
+
+        let mut set = HashSet::new();
+        set.insert(id1);
+        set.insert(id2);
+
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&id1));
+        assert!(set.contains(&id2));
+    }
+
+    #[test]
+    fn test_share_id_copy_clone() {
+        let id1 = ShareId::new();
+        let id2 = id1; // Copy
+        let id3 = id1.clone();
+
+        assert_eq!(id1, id2);
+        assert_eq!(id1, id3);
+    }
+
+    // ActiveShare tests
+
+    #[test]
+    fn test_active_share_new() {
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let url = "https://example.com".to_string();
+        let provider = "cloudflare".to_string();
+
+        let share = ActiveShare::new(id, path.clone(), url.clone(), provider.clone());
+
+        assert_eq!(share.id, id);
+        assert_eq!(share.session_path, path);
+        assert_eq!(share.public_url, url);
+        assert_eq!(share.provider_name, provider);
+    }
+
+    #[test]
+    fn test_active_share_session_name() {
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/my_session.jsonl");
+        let share = ActiveShare::new(id, path, "https://example.com".into(), "ngrok".into());
+
+        assert_eq!(share.session_name(), "my_session");
+    }
+
+    #[test]
+    fn test_active_share_session_name_no_extension() {
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/session");
+        let share = ActiveShare::new(id, path, "https://example.com".into(), "ngrok".into());
+
+        assert_eq!(share.session_name(), "session");
+    }
+
+    #[test]
+    fn test_active_share_duration() {
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let share = ActiveShare::new(id, path, "https://example.com".into(), "ngrok".into());
+
+        // Duration should be very small (just created)
+        assert!(share.duration().as_secs() < 1);
+    }
+
+    #[test]
+    fn test_active_share_duration_string() {
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let share = ActiveShare::new(id, path, "https://example.com".into(), "ngrok".into());
+
+        // Just created, should show seconds
+        let duration_str = share.duration_string();
+        assert!(duration_str.ends_with('s'));
+    }
+
+    // ShareManager tests
+
+    #[test]
+    fn test_share_manager_new() {
+        let manager = ShareManager::new(5);
+        assert_eq!(manager.max_shares, 5);
+        assert!(manager.active_shares.is_empty());
+        assert!(manager.handles.is_empty());
+    }
+
+    #[test]
+    fn test_share_manager_default() {
+        let manager = ShareManager::default();
+        assert!(manager.active_shares.is_empty());
+        assert!(manager.handles.is_empty());
+    }
+
+    #[test]
+    fn test_share_manager_can_add_share() {
+        let manager = ShareManager::new(2);
+        assert!(manager.can_add_share());
+    }
+
+    #[test]
+    fn test_share_manager_active_count() {
+        let manager = ShareManager::new(5);
+        assert_eq!(manager.active_count(), 0);
+    }
+
+    #[test]
+    fn test_share_manager_has_active_shares() {
+        let manager = ShareManager::new(5);
+        assert!(!manager.has_active_shares());
+    }
+
+    #[test]
+    fn test_share_manager_shares_empty() {
+        let manager = ShareManager::new(5);
+        assert!(manager.shares().is_empty());
+    }
+
+    #[test]
+    fn test_share_manager_get_share_none() {
+        let manager = ShareManager::new(5);
+        let id = ShareId::new();
+        assert!(manager.get_share(id).is_none());
+    }
+
+    #[test]
+    fn test_share_manager_get_handle_none() {
+        let manager = ShareManager::new(5);
+        let id = ShareId::new();
+        assert!(manager.get_handle(id).is_none());
+    }
+
+    #[test]
+    fn test_share_manager_poll_messages_empty() {
+        let manager = ShareManager::new(5);
+        let messages = manager.poll_messages();
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn test_share_manager_mark_started() {
+        let mut manager = ShareManager::new(5);
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let url = "https://example.com".to_string();
+        let provider = "cloudflare".to_string();
+
+        manager.mark_started(id, path.clone(), url.clone(), provider.clone());
+
+        assert_eq!(manager.active_count(), 1);
+        assert!(manager.has_active_shares());
+
+        let share = manager.get_share(id).unwrap();
+        assert_eq!(share.id, id);
+        assert_eq!(share.public_url, url);
+    }
+
+    #[test]
+    fn test_share_manager_stop_all() {
+        let mut manager = ShareManager::new(5);
+
+        // Add some shares manually (without handles for this test)
+        let id1 = ShareId::new();
+        let id2 = ShareId::new();
+        manager.mark_started(
+            id1,
+            PathBuf::from("/a.jsonl"),
+            "https://a.com".into(),
+            "ngrok".into(),
+        );
+        manager.mark_started(
+            id2,
+            PathBuf::from("/b.jsonl"),
+            "https://b.com".into(),
+            "cloudflare".into(),
+        );
+
+        assert_eq!(manager.active_count(), 2);
+
+        manager.stop_all();
+
+        assert_eq!(manager.active_count(), 0);
+        assert!(!manager.has_active_shares());
+    }
+
+    // ShareMessage test
+
+    #[test]
+    fn test_share_message_debug() {
+        let msg = ShareMessage {
+            share_id: ShareId::new(),
+            message: SharingMessage::Started {
+                url: "https://example.com".to_string(),
+            },
+        };
+        let debug = format!("{:?}", msg);
+        assert!(debug.contains("ShareMessage"));
     }
 }

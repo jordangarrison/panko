@@ -104,7 +104,7 @@
       "title": "Refactor sharing state for multiple shares",
       "description": "Refactor single SharingState to support multiple concurrent shares",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "New ActiveShare struct: id, session_path, public_url, provider_name, started_at",
         "App.active_shares: Vec<ActiveShare> replaces single state",

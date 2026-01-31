@@ -415,9 +415,6 @@ fn run_tui() -> Result<()> {
     // Track initial sort order to detect changes
     let initial_sort_order = app.sort_order();
 
-    // Track the active sharing handle (if any)
-    let mut sharing_handle: Option<tui::SharingHandle> = None;
-
     // Main loop that handles TUI and actions
     loop {
         // Initialize terminal
@@ -432,10 +429,8 @@ fn run_tui() -> Result<()> {
         // Handle the result
         match result {
             Ok(tui::RunResult::Done) => {
-                // User quit - stop any active sharing first
-                if let Some(handle) = sharing_handle.take() {
-                    handle.stop();
-                }
+                // User quit - stop all active shares first
+                app.stop_all_shares();
 
                 // Save sort order if changed
                 let final_sort_order = app.sort_order();
@@ -454,68 +449,95 @@ fn run_tui() -> Result<()> {
             }
             Ok(tui::RunResult::Action(action)) => {
                 // Handle the action
-                handle_tui_action(&action, &mut app, &mut sharing_handle)?;
+                handle_tui_action(&action, &mut app)?;
                 // Continue the TUI loop after action completes
             }
             Err(e) => {
-                // Stop sharing on error
-                if let Some(handle) = sharing_handle.take() {
-                    handle.stop();
-                }
+                // Stop all shares on error
+                app.stop_all_shares();
                 return Err(anyhow::anyhow!("Application error: {}", e));
             }
         }
 
-        // Check for sharing messages
-        let mut should_clear_handle = false;
-        if let Some(ref handle) = sharing_handle {
-            while let Some(msg) = handle.try_recv() {
-                match msg {
-                    tui::SharingMessage::Started { url } => {
-                        // Copy URL to clipboard
-                        if let Ok(mut clipboard) = Clipboard::new() {
-                            let _ = clipboard.set_text(&url);
-                        }
-                        // Update app state
-                        app.set_sharing_active(url, "tunnel".to_string());
-                    }
-                    tui::SharingMessage::Error { message } => {
-                        eprintln!("Sharing error: {}", message);
-                        app.clear_sharing_state();
-                        should_clear_handle = true;
-                    }
-                    tui::SharingMessage::Stopped => {
-                        app.clear_sharing_state();
-                        should_clear_handle = true;
-                    }
-                }
-            }
-        }
-        if should_clear_handle {
-            sharing_handle = None;
-        }
+        // Check for sharing messages from all active shares
+        process_sharing_messages(&mut app);
     }
 
     Ok(())
 }
 
+/// Process sharing messages from all active shares.
+fn process_sharing_messages(app: &mut tui::App) {
+    // Poll messages from all handles
+    let messages = app.share_manager().poll_messages();
+    let mut shares_to_remove: Vec<tui::ShareId> = Vec::new();
+
+    for (share_id, msg) in messages {
+        match msg {
+            tui::SharingMessage::Started { url } => {
+                // Copy URL to clipboard
+                if let Ok(mut clipboard) = Clipboard::new() {
+                    let _ = clipboard.set_text(&url);
+                }
+
+                // Check if this is for a pending share
+                if let Some((pending_id, path, provider)) = app.take_pending_share() {
+                    if pending_id == share_id {
+                        // Complete the pending share
+                        app.share_manager_mut().mark_started(
+                            share_id,
+                            path,
+                            url.clone(),
+                            provider.clone(),
+                        );
+                        // Update legacy sharing state for UI compatibility
+                        app.set_sharing_active(url, provider);
+                    }
+                }
+            }
+            tui::SharingMessage::Error { message } => {
+                eprintln!("Sharing error: {}", message);
+                shares_to_remove.push(share_id);
+                // Clear legacy state if this was the pending share
+                if app.pending_share_id() == Some(share_id) {
+                    app.clear_sharing_state();
+                }
+            }
+            tui::SharingMessage::Stopped => {
+                shares_to_remove.push(share_id);
+            }
+        }
+    }
+
+    // Remove stopped/errored shares
+    for id in shares_to_remove {
+        app.share_manager_mut().remove_handle(id);
+        // If no more shares, clear the legacy state
+        if !app.share_manager().has_active_shares() {
+            app.clear_sharing_state();
+        }
+    }
+}
+
 /// Handle an action triggered from the TUI.
-fn handle_tui_action(
-    action: &tui::Action,
-    app: &mut tui::App,
-    sharing_handle: &mut Option<tui::SharingHandle>,
-) -> Result<()> {
+fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
     match action {
         tui::Action::ViewSession(path) => {
-            // Stop any active sharing before viewing
-            if let Some(handle) = sharing_handle.take() {
-                handle.stop();
-                app.clear_sharing_state();
-            }
+            // Note: We don't stop shares when viewing, user can view while sharing
             // View the session using the existing server code
             handle_view_from_tui(path)?;
         }
         tui::Action::ShareSession(path) => {
+            // Check if we can add another share
+            if !app.can_add_share() {
+                eprintln!(
+                    "Maximum number of concurrent shares reached ({}). Stop a share first.",
+                    app.active_share_count()
+                );
+                wait_for_key("Press Enter to continue...");
+                return Ok(());
+            }
+
             // Detect available providers
             let available = detect_available_providers();
             if available.is_empty() {
@@ -535,10 +557,19 @@ fn handle_tui_action(
             if providers.len() == 1 {
                 // Only one provider - start sharing immediately
                 let provider = &providers[0];
-                *sharing_handle = Some(tui::SharingHandle::start(
+                let share_id = tui::ShareId::new();
+                let handle = tui::SharingHandle::start(path.clone(), provider.name.clone());
+
+                // Track pending share (waiting for Started message)
+                app.set_pending_share(share_id, path.clone(), provider.name.clone());
+                app.share_manager_mut().add_pending_share(
+                    share_id,
                     path.clone(),
                     provider.name.clone(),
-                ));
+                    handle,
+                );
+
+                // Set UI state to Starting
                 app.set_sharing_active("Starting...".to_string(), provider.name.clone());
             } else {
                 // Multiple providers - show selection popup
@@ -547,14 +578,21 @@ fn handle_tui_action(
         }
         tui::Action::StartSharing { path, provider } => {
             // Start sharing with the selected provider
-            *sharing_handle = Some(tui::SharingHandle::start(path.clone(), provider.clone()));
+            let share_id = tui::ShareId::new();
+            let handle = tui::SharingHandle::start(path.clone(), provider.clone());
+
+            // Track pending share
+            app.set_pending_share(share_id, path.clone(), provider.clone());
+            app.share_manager_mut().add_pending_share(
+                share_id,
+                path.clone(),
+                provider.clone(),
+                handle,
+            );
         }
         tui::Action::StopSharing => {
-            // Stop the current sharing session
-            if let Some(handle) = sharing_handle.take() {
-                handle.stop();
-            }
-            app.clear_sharing_state();
+            // Stop all active shares (legacy behavior for single Esc press)
+            app.stop_all_shares();
         }
         tui::Action::SharingStarted { url, provider } => {
             // This is handled via the message channel now
