@@ -149,6 +149,9 @@ impl DaemonServer {
         let pid_path = self.pid_path.clone();
         let mut shutdown_rx = self.shutdown_tx.subscribe();
 
+        // Clone shutdown_tx for the accept loop
+        let shutdown_tx_for_loop = self.shutdown_tx.clone();
+
         // Spawn the accept loop
         tokio::spawn(async move {
             loop {
@@ -159,10 +162,11 @@ impl DaemonServer {
                             Ok((stream, _addr)) => {
                                 debug!("Accepted new connection");
                                 let share_service = Arc::clone(&share_service);
+                                let shutdown_tx = shutdown_tx_for_loop.clone();
                                 let mut conn_shutdown_rx = shutdown_rx.resubscribe();
 
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_connection(stream, share_service, &mut conn_shutdown_rx).await {
+                                    if let Err(e) = handle_connection(stream, share_service, shutdown_tx, &mut conn_shutdown_rx).await {
                                         match e {
                                             ServerError::Shutdown => {
                                                 debug!("Connection closed due to shutdown");
@@ -227,6 +231,7 @@ impl Default for DaemonServer {
 async fn handle_connection(
     stream: UnixStream,
     share_service: Arc<ShareService>,
+    shutdown_tx: broadcast::Sender<()>,
     shutdown_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), ServerError> {
     let (reader, mut writer) = stream.into_split();
@@ -270,6 +275,8 @@ async fn handle_connection(
                         writer.flush().await?;
 
                         if should_shutdown {
+                            // Broadcast shutdown to the main server loop
+                            let _ = shutdown_tx.send(());
                             return Err(ServerError::Shutdown);
                         }
                     }

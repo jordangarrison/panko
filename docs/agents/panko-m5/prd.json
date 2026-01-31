@@ -70,7 +70,7 @@
       "title": "Add serve command to CLI",
       "description": "Add panko serve subcommand to run the daemon",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Add Serve subcommand with --foreground flag",
         "Add ServeStop subcommand",

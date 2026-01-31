@@ -5,6 +5,9 @@ use inquire::Select;
 use std::path::{Path, PathBuf};
 
 use panko::config::{format_config, Config};
+use panko::daemon::server::{
+    default_pid_path, default_socket_path, is_daemon_running, read_daemon_pid, DaemonServer,
+};
 use panko::export::{format_context, ContextOptions};
 use panko::logging::{init_logging, init_tui_logging, LogConfig, Verbosity};
 use panko::parser::{ClaudeParser, SessionParser};
@@ -73,6 +76,19 @@ enum Commands {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+    /// Start the sharing daemon
+    #[command(name = "serve")]
+    Serve {
+        /// Run in foreground instead of daemonizing
+        #[arg(long)]
+        foreground: bool,
+    },
+    /// Stop the sharing daemon
+    #[command(name = "serve-stop")]
+    ServeStop,
+    /// Show daemon status
+    #[command(name = "serve-status")]
+    ServeStatus,
 }
 
 #[derive(Subcommand)]
@@ -406,6 +422,15 @@ async fn main() -> Result<()> {
         }
         Commands::Config { action } => {
             handle_config_command(action)?;
+        }
+        Commands::Serve { foreground } => {
+            handle_serve_command(foreground).await?;
+        }
+        Commands::ServeStop => {
+            handle_serve_stop_command().await?;
+        }
+        Commands::ServeStatus => {
+            handle_serve_status_command().await?;
         }
     }
 
@@ -1061,4 +1086,229 @@ fn format_duration(total_secs: i64) -> String {
     } else {
         format!("{}s", seconds)
     }
+}
+
+/// Handle the serve command - start the sharing daemon
+async fn handle_serve_command(foreground: bool) -> Result<()> {
+    // Check if daemon is already running
+    if is_daemon_running() {
+        let pid = read_daemon_pid().unwrap_or(0);
+        anyhow::bail!(
+            "Daemon is already running (PID: {}). Use 'panko serve-stop' to stop it first.",
+            pid
+        );
+    }
+
+    if foreground {
+        // Run in foreground
+        println!("Starting daemon in foreground mode...");
+        println!("Socket: {}", default_socket_path().display());
+        println!("PID file: {}", default_pid_path().display());
+        println!("\nPress Ctrl+C to stop\n");
+
+        let server = DaemonServer::new().context("Failed to create daemon server")?;
+        let handle = server.run().await.context("Failed to start daemon")?;
+
+        // Wait for shutdown signal
+        shutdown_signal().await;
+
+        // Initiate graceful shutdown
+        handle.shutdown();
+
+        // Give time for cleanup
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        println!("\nDaemon stopped");
+    } else {
+        // Daemonize by spawning self with --foreground
+        println!("Starting daemon...");
+
+        #[cfg(unix)]
+        {
+            use std::process::{Command, Stdio};
+
+            // Get the current executable path
+            let exe = std::env::current_exe().context("Failed to get current executable")?;
+
+            // Spawn the daemon as a detached process
+            let child = Command::new(&exe)
+                .args(["serve", "--foreground"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("Failed to spawn daemon process")?;
+
+            // Give the daemon a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            // Check if daemon started successfully
+            let socket_path = default_socket_path();
+            if socket_path.exists() {
+                println!("Daemon started (PID: {})", child.id());
+            } else {
+                anyhow::bail!(
+                    "Daemon process started but socket not found. Check logs for errors."
+                );
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            anyhow::bail!(
+                "Daemonization is not supported on this platform. Use --foreground instead."
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle the serve-stop command - stop the sharing daemon
+async fn handle_serve_stop_command() -> Result<()> {
+    use panko::daemon::protocol::{DaemonRequest, DaemonResponse};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+
+    let socket_path = default_socket_path();
+
+    // Try to connect to the daemon
+    let stream = match UnixStream::connect(&socket_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound
+                || e.kind() == std::io::ErrorKind::ConnectionRefused
+            {
+                println!("Daemon is not running");
+                return Ok(());
+            }
+            anyhow::bail!("Failed to connect to daemon: {}", e);
+        }
+    };
+
+    let (reader, mut writer) = stream.into_split();
+
+    // Send shutdown request
+    let request = DaemonRequest::Shutdown;
+    let request_json = serde_json::to_string(&request)?;
+    writer.write_all(request_json.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await?;
+
+    // Read response
+    let mut reader = BufReader::new(reader);
+    let mut response_line = String::new();
+    reader.read_line(&mut response_line).await?;
+
+    let response: DaemonResponse = serde_json::from_str(&response_line)?;
+
+    match response {
+        DaemonResponse::ShuttingDown => {
+            println!("Daemon is shutting down...");
+            // Wait a bit for the daemon to clean up
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            println!("Daemon stopped");
+        }
+        DaemonResponse::Error { message } => {
+            anyhow::bail!("Failed to stop daemon: {}", message);
+        }
+        _ => {
+            anyhow::bail!("Unexpected response from daemon: {:?}", response);
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle the serve-status command - show daemon status
+async fn handle_serve_status_command() -> Result<()> {
+    use panko::daemon::protocol::{DaemonRequest, DaemonResponse};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+
+    let socket_path = default_socket_path();
+    let pid_path = default_pid_path();
+
+    // Try to connect to the daemon
+    let stream = match UnixStream::connect(&socket_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound
+                || e.kind() == std::io::ErrorKind::ConnectionRefused
+            {
+                println!("Daemon: stopped");
+                println!("Socket: {} (not found)", socket_path.display());
+                return Ok(());
+            }
+            anyhow::bail!("Failed to connect to daemon: {}", e);
+        }
+    };
+
+    let (reader, mut writer) = stream.into_split();
+
+    // Send list shares request to get share count
+    let request = DaemonRequest::ListShares;
+    let request_json = serde_json::to_string(&request)?;
+    writer.write_all(request_json.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await?;
+
+    // Read response
+    let mut reader = BufReader::new(reader);
+    let mut response_line = String::new();
+    reader.read_line(&mut response_line).await?;
+
+    let response: DaemonResponse = serde_json::from_str(&response_line)?;
+
+    // Get PID if available
+    let pid = read_daemon_pid();
+
+    match response {
+        DaemonResponse::ShareList(shares) => {
+            let active_count = shares
+                .iter()
+                .filter(|s| {
+                    matches!(
+                        s.status,
+                        panko::daemon::protocol::ShareStatus::Active
+                            | panko::daemon::protocol::ShareStatus::Starting
+                    )
+                })
+                .count();
+
+            println!("Daemon: running");
+            if let Some(p) = pid {
+                println!("PID: {}", p);
+            }
+            println!("Socket: {}", socket_path.display());
+            println!("PID file: {}", pid_path.display());
+            println!("Active shares: {}", active_count);
+
+            if !shares.is_empty() {
+                println!("\nShares:");
+                for share in &shares {
+                    let status_str = match share.status {
+                        panko::daemon::protocol::ShareStatus::Active => "active",
+                        panko::daemon::protocol::ShareStatus::Starting => "starting",
+                        panko::daemon::protocol::ShareStatus::Error => "error",
+                        panko::daemon::protocol::ShareStatus::Stopped => "stopped",
+                    };
+                    println!(
+                        "  {} - {} [{}]",
+                        share.session_name, share.public_url, status_str
+                    );
+                }
+            }
+        }
+        DaemonResponse::Error { message } => {
+            println!("Daemon: running (error getting status)");
+            println!("Error: {}", message);
+        }
+        _ => {
+            println!("Daemon: running");
+            println!("(unexpected response)");
+        }
+    }
+
+    Ok(())
 }

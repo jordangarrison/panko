@@ -195,4 +195,59 @@ Created the ShareService that ports sharing logic from TUI threads to the daemon
 
 ---
 
+## 2026-01-31: Story 5 - Add serve command to CLI
+
+### Summary
+Added CLI subcommands for managing the daemon: `panko serve`, `panko serve-stop`, and `panko serve-status`. These commands allow users to start, stop, and monitor the sharing daemon from the command line.
+
+### Changes
+- Added `Serve` subcommand to `Commands` enum with `--foreground` flag
+- Added `ServeStop` subcommand for stopping the daemon
+- Added `ServeStatus` subcommand for checking daemon status
+- Implemented `handle_serve_command()`:
+  - Checks if daemon is already running
+  - Foreground mode: runs server directly with proper signal handling
+  - Background mode (default): spawns detached process with `panko serve --foreground`
+  - Validates socket creation after spawn
+- Implemented `handle_serve_stop_command()`:
+  - Connects to daemon via Unix socket
+  - Sends `Shutdown` request and waits for `ShuttingDown` response
+  - Handles graceful degradation when daemon is not running
+- Implemented `handle_serve_status_command()`:
+  - Connects to daemon and sends `ListShares` request
+  - Displays: daemon status (running/stopped), PID, socket path, PID file path
+  - Shows active share count and lists shares if any exist
+- Added imports for daemon protocol types and tokio utilities
+
+### CLI Usage
+```bash
+# Start daemon (daemonizes by default)
+panko serve
+
+# Start daemon in foreground mode
+panko serve --foreground
+
+# Stop the daemon
+panko serve-stop
+
+# Check daemon status and active shares
+panko serve-status
+```
+
+### Validation Results
+- [x] `cargo build` - PASSED
+- [x] `cargo test` - PASSED (643 tests)
+- [x] `cargo clippy` - PASSED (no warnings)
+- [x] `cargo fmt --check` - PASSED
+- [x] Manual test: `panko serve` starts daemon and prints PID
+- [x] Manual test: `panko serve-status` shows running status with share count
+- [x] Manual test: `panko serve-stop` sends shutdown and confirms stopped
+- [x] Manual test: `panko serve --foreground` runs in foreground mode
+
+### Files Modified
+- `src/main.rs` (CLI subcommands and handlers)
+- `docs/agents/panko-m5/prd.json` (marked story as complete)
+
+---
+
 <!-- Work entries will be added above as stories are completed -->
