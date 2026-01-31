@@ -8,7 +8,7 @@
       "title": "Remove restrictive sharing key handler",
       "description": "Remove the sharing_state.is_active() check that locks out normal controls. This check currently routes all keys to handle_sharing_key() which blocks most operations.",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Normal navigation (j/k) works while shares are active",
         "View session (Enter) works while shares are active",
@@ -25,7 +25,7 @@
       "title": "Block deleting shared sessions with message",
       "description": "Add check to prevent deleting sessions that are currently being shared. Uses path-based check instead of legacy sharing_state.",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Add is_session_shared() helper to ShareManager",
         "Delete handler checks if session is shared",
@@ -39,7 +39,7 @@
       "title": "Escape no longer kills shares",
       "description": "Remove Esc -> StopSharing behavior from main view. Shares should only be stopped from the Shares Panel.",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Pressing Esc in main view does not stop shares",
         "Shares can only be stopped from Shares Panel (Shift+S)",
@@ -53,7 +53,7 @@
       "title": "Clean up legacy sharing state",
       "description": "Remove or simplify handle_sharing_key() function since it's no longer needed after removing the routing check.",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "handle_sharing_key() removed or minimized",
         "No dead code warnings from clippy",

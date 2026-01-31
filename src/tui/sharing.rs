@@ -217,6 +217,11 @@ impl ShareManager {
         &self.active_shares
     }
 
+    /// Check if a specific session is currently being shared.
+    pub fn is_session_shared(&self, path: &std::path::Path) -> bool {
+        self.active_shares.iter().any(|s| s.session_path == path)
+    }
+
     /// Get a handle by ID.
     pub fn get_handle(&self, id: ShareId) -> Option<&SharingHandle> {
         self.handles.get(&id)
@@ -830,6 +835,49 @@ mod tests {
 
         assert_eq!(manager.active_count(), 0);
         assert!(!manager.has_active_shares());
+    }
+
+    // is_session_shared tests
+
+    #[test]
+    fn test_is_session_shared_true() {
+        let mut manager = ShareManager::new(5);
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/session.jsonl");
+
+        manager.mark_started(
+            id,
+            path.clone(),
+            "https://example.com".into(),
+            "ngrok".into(),
+        );
+
+        assert!(manager.is_session_shared(&path));
+    }
+
+    #[test]
+    fn test_is_session_shared_false() {
+        let mut manager = ShareManager::new(5);
+        let id = ShareId::new();
+        let path = PathBuf::from("/path/to/session.jsonl");
+        let other_path = PathBuf::from("/path/to/other.jsonl");
+
+        manager.mark_started(
+            id,
+            path.clone(),
+            "https://example.com".into(),
+            "ngrok".into(),
+        );
+
+        assert!(!manager.is_session_shared(&other_path));
+    }
+
+    #[test]
+    fn test_is_session_shared_empty() {
+        let manager = ShareManager::new(5);
+        let path = PathBuf::from("/path/to/session.jsonl");
+
+        assert!(!manager.is_session_shared(&path));
     }
 
     // ShareMessage test

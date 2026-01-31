@@ -1,5 +1,48 @@
 # Panko Progress Log
 
+## 2026-01-31 - M4: Sharing UX Polish - All Stories Complete
+
+### Summary
+Verified that all M4 (Sharing UX Polish) features were already implemented in the codebase. The milestone focused on making normal controls work during sharing, blocking deletion of shared sessions, and removing legacy sharing key handlers.
+
+### Verification Results
+
+**Story 1: Remove restrictive sharing key handler**
+- ✅ No `sharing_state.is_active()` check blocking normal controls
+- ✅ Tests verify: navigation (j/k), view (Enter), copy path (c), open folder (o), refresh (r), help (?), search (/) all work while sharing
+- Tests: `test_sharing_navigation_still_works`, `test_sharing_view_session_works`, `test_sharing_help_works`, `test_sharing_search_works`
+
+**Story 2: Block deleting shared sessions with message**
+- ✅ `is_session_shared()` helper exists in ShareManager (sharing.rs:221)
+- ✅ Delete handler checks if session is shared (app.rs:459-471)
+- ✅ Shows "Cannot delete: session is being shared" message
+- Tests: `test_handle_key_d_blocked_when_session_is_shared`, `test_handle_key_d_allowed_when_different_session_is_shared`
+
+**Story 3: Escape no longer kills shares**
+- ✅ Esc in main view clears search or quits (does not stop shares)
+- ✅ Shares only stopped via Shares Panel (Shift+S → d to stop individual share)
+- ✅ Shares panel Esc closes panel without stopping shares
+- Tests: `test_sharing_esc_does_not_stop_sharing`, `test_shares_panel_esc_closes`
+
+**Story 4: Clean up legacy sharing state**
+- ✅ `handle_sharing_key()` function removed from codebase
+- ✅ No dead code warnings from clippy
+- ✅ All 600 tests pass
+
+### Validation
+```
+cargo build          ✓
+cargo test           ✓ (600 tests passed)
+cargo clippy         ✓ (no warnings)
+cargo fmt --check    ✓
+```
+
+### Files Verified
+- `src/tui/app.rs` - Key handlers, delete protection, no blocking sharing check
+- `src/tui/sharing.rs` - `is_session_shared()` helper method
+
+---
+
 ## 2026-01-30 - M3 Story 11: Open draft PR for M3
 
 ### Summary

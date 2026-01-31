@@ -347,10 +347,6 @@ impl App {
             return self.handle_provider_select_key(key_event);
         }
 
-        if self.sharing_state.is_active() {
-            return self.handle_sharing_key(key_event);
-        }
-
         // Handle shares panel (shown with Shift+S)
         if self.show_shares_panel {
             return self.handle_shares_panel_key(key_event);
@@ -461,14 +457,16 @@ impl App {
             }
             // Delete: d to delete selected session (with confirmation)
             KeyCode::Char('d') => {
-                // Cannot delete while sharing is active
-                if self.sharing_state.is_active() {
-                    self.set_status_message("✗ Cannot delete while sharing is active");
-                } else if let Some(session) = self.selected_session() {
-                    self.confirmation_state = ConfirmationState::ConfirmingDelete {
-                        session_path: session.path.clone(),
-                        session_id: session.id.clone(),
-                    };
+                if let Some(session) = self.selected_session() {
+                    // Cannot delete a session that is currently being shared
+                    if self.share_manager.is_session_shared(&session.path) {
+                        self.set_status_message("✗ Cannot delete: session is being shared");
+                    } else {
+                        self.confirmation_state = ConfirmationState::ConfirmingDelete {
+                            session_path: session.path.clone(),
+                            session_id: session.id.clone(),
+                        };
+                    }
                 }
             }
             // Help: ? to show keyboard shortcuts
@@ -632,55 +630,6 @@ impl App {
             _ => {
                 self.dismiss_share_modal();
             }
-        }
-        Ok(())
-    }
-
-    /// Handle key events when actively sharing.
-    fn handle_sharing_key(&mut self, key_event: KeyEvent) -> AppResult<()> {
-        match key_event.code {
-            // Esc stops sharing
-            KeyCode::Esc => {
-                self.sharing_state = SharingState::Stopping;
-                self.pending_action = Action::StopSharing;
-            }
-            // Quit also stops sharing first
-            KeyCode::Char('q') => {
-                self.sharing_state = SharingState::Stopping;
-                self.pending_action = Action::StopSharing;
-                // Note: The main loop will need to handle quitting after stop
-            }
-            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.sharing_state = SharingState::Stopping;
-                self.pending_action = Action::StopSharing;
-            }
-            // Delete is blocked while sharing
-            KeyCode::Char('d') => {
-                self.set_status_message("✗ Cannot delete while sharing is active");
-            }
-            // Navigation still works while sharing
-            KeyCode::Char('j') | KeyCode::Down
-                if self.focused_panel == FocusedPanel::SessionList =>
-            {
-                self.session_list_state.select_next();
-            }
-            KeyCode::Char('k') | KeyCode::Up if self.focused_panel == FocusedPanel::SessionList => {
-                self.session_list_state.select_previous();
-            }
-            KeyCode::Tab => {
-                self.focused_panel.toggle();
-            }
-            // Toggle shares panel with Shift+S
-            KeyCode::Char('S') => {
-                self.toggle_shares_panel();
-            }
-            // Allow starting another share while sharing is active
-            KeyCode::Char('s') => {
-                if let Some(session) = self.selected_session() {
-                    self.pending_action = Action::ShareSession(session.path.clone());
-                }
-            }
-            _ => {}
         }
         Ok(())
     }
@@ -2065,23 +2014,26 @@ mod tests {
         }
     }
 
-    // Tests for active sharing key handling
+    // Tests for key handling during active sharing
+    // Note: Normal controls work while sharing. Share management is via Shares Panel (Shift+S).
 
     #[test]
-    fn test_sharing_esc_stops_sharing() {
+    fn test_sharing_esc_does_not_stop_sharing() {
         let mut app = App::new();
         app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
         assert!(app.sharing_state().is_active());
 
-        // Press Esc to stop sharing
+        // Press Esc - should NOT stop sharing, just quit normally
         app.handle_key_event(key_event(KeyCode::Esc)).unwrap();
 
-        // Should have StopSharing action
-        assert!(app.has_pending_action());
-        assert_eq!(app.take_pending_action(), Action::StopSharing);
+        // Should NOT have StopSharing action (Esc quits when not searching)
+        assert!(!app.has_pending_action());
 
-        // State should be stopping
-        assert!(matches!(app.sharing_state(), &SharingState::Stopping));
+        // Sharing state should still be active (not stopping)
+        assert!(app.sharing_state().is_active());
+
+        // App should be quitting
+        assert!(!app.is_running());
     }
 
     #[test]
@@ -2098,6 +2050,42 @@ mod tests {
         assert_eq!(app.focused_panel(), FocusedPanel::SessionList);
         app.handle_key_event(key_event(KeyCode::Tab)).unwrap();
         assert_eq!(app.focused_panel(), FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn test_sharing_view_session_works() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+        app.session_list_state_mut().select_next(); // Select first session
+
+        // View (Enter) should work while sharing
+        app.handle_key_event(key_event(KeyCode::Enter)).unwrap();
+
+        // Should have ViewSession action
+        assert!(app.has_pending_action());
+        assert!(matches!(app.pending_action(), Action::ViewSession(_)));
+    }
+
+    #[test]
+    fn test_sharing_help_works() {
+        let mut app = App::new();
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+
+        // Help (?) should work while sharing
+        app.handle_key_event(key_event(KeyCode::Char('?'))).unwrap();
+
+        assert!(app.show_help);
+    }
+
+    #[test]
+    fn test_sharing_search_works() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+
+        // Search (/) should work while sharing
+        app.handle_key_event(key_event(KeyCode::Char('/'))).unwrap();
+
+        assert!(app.search_active);
     }
 
     // Tests for copy path action
@@ -2725,12 +2713,23 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_key_d_blocked_while_sharing() {
+    fn test_handle_key_d_blocked_when_session_is_shared() {
         let mut app = App::with_sessions(sample_sessions());
-        app.session_list_state_mut().select_next();
-        app.set_sharing_active("https://example.com".to_string(), "cloudflare".to_string());
+        app.session_list_state_mut().select_next(); // Select first session
 
-        // Press 'd' while sharing is active
+        // Get the path of the selected session
+        let session_path = app.selected_session().unwrap().path.clone();
+
+        // Add the selected session to active shares
+        let id = crate::tui::sharing::ShareId::new();
+        app.share_manager.mark_started(
+            id,
+            session_path,
+            "https://example.com".to_string(),
+            "cloudflare".to_string(),
+        );
+
+        // Press 'd' while this specific session is being shared
         app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
 
         // Should show status message and NOT be in confirmation state
@@ -2739,7 +2738,32 @@ mod tests {
         assert!(app
             .status_message()
             .unwrap()
-            .contains("Cannot delete while sharing"));
+            .contains("Cannot delete: session is being shared"));
+    }
+
+    #[test]
+    fn test_handle_key_d_allowed_when_different_session_is_shared() {
+        let mut app = App::with_sessions(sample_sessions());
+        app.session_list_state_mut().select_next(); // Select first session
+
+        // Add a DIFFERENT session to active shares (not the selected one)
+        let id = crate::tui::sharing::ShareId::new();
+        app.share_manager.mark_started(
+            id,
+            PathBuf::from("/some/other/session.jsonl"),
+            "https://example.com".to_string(),
+            "cloudflare".to_string(),
+        );
+
+        // Press 'd' - should be allowed since the selected session is not being shared
+        app.handle_key_event(key_event(KeyCode::Char('d'))).unwrap();
+
+        // Should enter confirmation state (delete is allowed)
+        assert!(app.is_confirming());
+        assert!(matches!(
+            app.confirmation_state(),
+            ConfirmationState::ConfirmingDelete { .. }
+        ));
     }
 
     #[test]
