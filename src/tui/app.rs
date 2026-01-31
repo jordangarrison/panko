@@ -2380,4 +2380,119 @@ mod tests {
         // Session count should decrease
         assert!(app.session_list_state().visible_count() < initial_count);
     }
+
+    // SharingState predicate tests
+
+    #[test]
+    fn test_sharing_state_is_active_predicate() {
+        // Active state
+        let active = SharingState::Active {
+            public_url: "https://test.url".into(),
+            provider_name: "test".into(),
+        };
+        assert!(active.is_active());
+        assert!(active.is_busy());
+        assert!(!active.is_selecting_provider());
+
+        // Inactive state
+        let inactive = SharingState::Inactive;
+        assert!(!inactive.is_active());
+        assert!(!inactive.is_busy());
+        assert!(!inactive.is_selecting_provider());
+    }
+
+    #[test]
+    fn test_sharing_state_public_url_accessor() {
+        // Active state has URL
+        let active = SharingState::Active {
+            public_url: "https://test.url".into(),
+            provider_name: "test".into(),
+        };
+        assert_eq!(active.public_url(), Some("https://test.url"));
+
+        // Inactive state has no URL
+        let inactive = SharingState::Inactive;
+        assert_eq!(inactive.public_url(), None);
+
+        // Starting state has no URL
+        let starting = SharingState::Starting {
+            session_path: PathBuf::from("/test.jsonl"),
+            provider_name: "test".into(),
+        };
+        assert_eq!(starting.public_url(), None);
+
+        // Selecting provider has no URL
+        let selecting = SharingState::SelectingProvider {
+            session_path: PathBuf::from("/test.jsonl"),
+        };
+        assert_eq!(selecting.public_url(), None);
+
+        // Stopping has no URL
+        let stopping = SharingState::Stopping;
+        assert_eq!(stopping.public_url(), None);
+    }
+
+    #[test]
+    fn test_sharing_state_selecting_provider_predicate() {
+        let state = SharingState::SelectingProvider {
+            session_path: PathBuf::from("/test.jsonl"),
+        };
+        assert!(state.is_selecting_provider());
+        assert!(state.is_busy());
+        assert!(!state.is_active());
+    }
+
+    #[test]
+    fn test_sharing_state_starting_predicates() {
+        let state = SharingState::Starting {
+            session_path: PathBuf::from("/test.jsonl"),
+            provider_name: "cloudflare".into(),
+        };
+        assert!(!state.is_selecting_provider());
+        assert!(state.is_busy());
+        assert!(!state.is_active());
+    }
+
+    #[test]
+    fn test_sharing_state_stopping_predicates() {
+        let state = SharingState::Stopping;
+        assert!(!state.is_selecting_provider());
+        assert!(state.is_busy());
+        assert!(!state.is_active());
+    }
+
+    #[test]
+    fn test_sharing_state_all_variants_covered() {
+        // Ensure all SharingState variants are testable
+        let states = vec![
+            SharingState::Inactive,
+            SharingState::SelectingProvider {
+                session_path: PathBuf::from("/test.jsonl"),
+            },
+            SharingState::Starting {
+                session_path: PathBuf::from("/test.jsonl"),
+                provider_name: "test".into(),
+            },
+            SharingState::Active {
+                public_url: "https://test.url".into(),
+                provider_name: "test".into(),
+            },
+            SharingState::Stopping,
+        ];
+
+        // Verify each state has consistent predicates
+        for state in &states {
+            // Only one of these can be true (or none for Inactive)
+            let is_active = state.is_active();
+            let is_selecting = state.is_selecting_provider();
+
+            // Active and selecting are mutually exclusive
+            assert!(!(is_active && is_selecting));
+
+            // If busy, state is not Inactive
+            if state.is_busy() {
+                assert!(!matches!(state, SharingState::Inactive));
+            }
+        }
+    }
 }

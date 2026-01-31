@@ -642,12 +642,14 @@ fn handle_view_from_tui(path: &Path) -> Result<()> {
         open_browser: true,
     };
 
-    // Run the server in a tokio runtime
-    let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
-    rt.block_on(async {
-        if let Err(e) = run_server(session, server_config).await {
-            eprintln!("Server error: {}", e);
-        }
+    // Run the server using the current runtime (we're already inside #[tokio::main])
+    // Use block_in_place to run async code from synchronous context within runtime
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            if let Err(e) = run_server(session, server_config).await {
+                eprintln!("Server error: {}", e);
+            }
+        })
     });
 
     println!("\nReturning to session browser...\n");

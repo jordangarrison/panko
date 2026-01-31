@@ -166,6 +166,7 @@ fn sharing_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn test_sharing_message_debug() {
@@ -181,5 +182,108 @@ mod tests {
         let cmd = SharingCommand::Stop;
         let debug = format!("{:?}", cmd);
         assert!(debug.contains("Stop"));
+    }
+
+    #[test]
+    fn test_try_recv_returns_none_on_empty_channel() {
+        let (_tx, rx) = mpsc::channel::<SharingMessage>();
+        // try_recv should return Err immediately (non-blocking)
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_stop_command_sends_correctly() {
+        let (tx, rx) = mpsc::channel::<SharingCommand>();
+        tx.send(SharingCommand::Stop).unwrap();
+
+        let received = rx.recv_timeout(Duration::from_millis(10));
+        assert!(matches!(received, Ok(SharingCommand::Stop)));
+    }
+
+    #[test]
+    fn test_message_started_round_trip() {
+        let (tx, rx) = mpsc::channel();
+        let url = "https://test.example.com".to_string();
+        tx.send(SharingMessage::Started { url: url.clone() })
+            .unwrap();
+
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(SharingMessage::Started { url: received_url }) => {
+                assert_eq!(received_url, url);
+            }
+            _ => panic!("Expected Started message"),
+        }
+    }
+
+    #[test]
+    fn test_message_error_round_trip() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(SharingMessage::Error {
+            message: "test error".into(),
+        })
+        .unwrap();
+
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(SharingMessage::Error { message }) => {
+                assert_eq!(message, "test error");
+            }
+            _ => panic!("Expected Error message"),
+        }
+    }
+
+    #[test]
+    fn test_message_stopped_round_trip() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(SharingMessage::Stopped).unwrap();
+
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_millis(10)),
+            Ok(SharingMessage::Stopped)
+        ));
+    }
+
+    #[test]
+    fn test_channel_operations_are_fast() {
+        let (_tx, rx) = mpsc::channel::<SharingMessage>();
+
+        let start = Instant::now();
+        for _ in 0..1000 {
+            let _ = rx.try_recv();
+        }
+        // 1000 try_recv calls should complete in under 10ms
+        assert!(
+            start.elapsed().as_millis() < 10,
+            "Channel operations too slow: {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn test_sharing_message_variants() {
+        // Test all message types can be created and matched
+        let messages = vec![
+            SharingMessage::Started {
+                url: "https://example.com".to_string(),
+            },
+            SharingMessage::Error {
+                message: "error".to_string(),
+            },
+            SharingMessage::Stopped,
+        ];
+
+        for msg in messages {
+            match msg {
+                SharingMessage::Started { url } => assert!(!url.is_empty()),
+                SharingMessage::Error { message } => assert!(!message.is_empty()),
+                SharingMessage::Stopped => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_sharing_command_variants() {
+        // Test command can be created and matched
+        let cmd = SharingCommand::Stop;
+        assert!(matches!(cmd, SharingCommand::Stop));
     }
 }
