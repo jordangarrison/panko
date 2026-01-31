@@ -118,7 +118,7 @@
       "title": "Handle reconnection and recovery",
       "description": "TUI reconnects to existing shares on restart",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "On TUI start, fetch existing shares from daemon",
         "Display reconnected shares in shares panel",

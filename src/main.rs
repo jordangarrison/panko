@@ -460,6 +460,10 @@ fn run_tui() -> Result<()> {
     // Apply max_shares from config (default is 5)
     app.set_max_shares(config.effective_max_shares(tui::DEFAULT_MAX_SHARES));
 
+    // Initialize daemon connection to fetch existing shares
+    // This runs in the background and will reconnect to any active shares
+    app.init_daemon_connection();
+
     // Track initial sort order to detect changes
     let initial_sort_order = app.sort_order();
 

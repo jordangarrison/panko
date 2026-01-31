@@ -1,6 +1,6 @@
 # Milestone 5 Progress Log
 
-## Status: In Progress
+## Status: Complete
 
 ---
 
@@ -393,4 +393,130 @@ The daemon bridge spawns background threads that:
 
 ---
 
-<!-- Work entries will be added above as stories are completed -->
+## 2026-01-31: Story 8 - Handle reconnection and recovery
+
+### Summary
+Implemented TUI reconnection to existing shares on startup and graceful handling of daemon connection failures. The TUI now fetches existing shares from the daemon when it starts, displays them in the shares panel, and provides user feedback and recovery options when connection issues occur.
+
+### Changes
+
+#### src/tui/app.rs
+- Added `DaemonConnectionState` enum with variants:
+  - `NotConnected` - Haven't attempted to connect yet
+  - `Connecting` - Currently connecting to daemon
+  - `Connected` - Connected and shares have been fetched
+  - `DaemonNotRunning` - Daemon is not running
+  - `Failed { error }` - Connection failed with an error
+- Added `DaemonConnectionState` implementation with helper methods:
+  - `is_connecting()`, `is_connected()`, `is_failed()`, `error_message()`
+- Added new fields to `App` struct:
+  - `daemon_connection_state: DaemonConnectionState`
+  - `daemon_init_rx: Option<Receiver<DaemonMessage>>` - for receiving init messages
+  - `reconnection_notified: bool` - tracks whether we've shown reconnection notification
+- Added new methods to `App`:
+  - `daemon_connection_state()` - accessor for connection state
+  - `init_daemon_connection()` - initiates daemon connection and share fetch
+  - `poll_daemon_init()` - polls for daemon init completion (called from tick())
+  - `handle_daemon_init_message()` - processes init messages
+  - `retry_daemon_connection()` - allows manual reconnection after failures
+- Updated `tick()` to poll daemon init when connecting
+- Added 'R' key handler to retry daemon connection when failed or refresh when connected
+- Updated `process_daemon_share_messages()` to:
+  - Update connection state on `Connected` message
+  - Show error message and update state on `ConnectionFailed`
+  - Detect connection errors in `Error` messages and update state
+
+#### src/tui/widgets/help.rs
+- Added `("R", "Reconnect daemon")` to Actions shortcuts list
+
+#### src/tui/mod.rs
+- Added `DaemonConnectionState` to exports from `app` module
+
+#### src/main.rs
+- Added call to `app.init_daemon_connection()` after app initialization
+
+### Key Features
+1. **Automatic reconnection on startup**: TUI calls `init_daemon_connection()` during startup which spawns a background thread to fetch shares from the daemon
+2. **Status message on reconnection**: Shows "✓ Reconnected to N active share(s)" when reconnecting to existing shares
+3. **Graceful daemon-not-running handling**: When daemon isn't running, connection state is set to `DaemonNotRunning` without showing an error (expected behavior)
+4. **Error handling with recovery**: When connection fails, shows error message with hint "Press 'R' to retry"
+5. **Manual refresh**: 'R' key can be used to:
+   - Retry connection when failed
+   - Refresh share list when connected
+6. **Connection state tracking**: Full state machine for tracking daemon connection status
+
+### Tests Added
+- `test_daemon_connection_state_default`
+- `test_daemon_connection_state_is_connecting`
+- `test_daemon_connection_state_is_connected`
+- `test_daemon_connection_state_is_failed`
+- `test_daemon_connection_state_error_message`
+- `test_app_daemon_connection_state_default`
+- `test_app_daemon_sharing_enabled_by_default`
+- `test_app_init_daemon_connection_when_disabled`
+- `test_app_init_daemon_connection_sets_connecting`
+- `test_app_retry_daemon_connection_resets_state`
+- `test_handle_key_shift_r_does_nothing_when_not_failed`
+- `test_handle_key_shift_r_retries_when_failed`
+- `test_handle_key_shift_r_refreshes_when_connected`
+- `test_handle_key_shift_r_does_nothing_when_daemon_disabled`
+
+### Validation Results
+- [x] `cargo build` - PASSED
+- [x] `cargo test` - PASSED (679 tests, including 14 new tests)
+- [x] `cargo clippy` - PASSED (no warnings)
+- [x] `cargo fmt --check` - PASSED
+
+### Files Modified
+- `src/tui/app.rs`
+- `src/tui/mod.rs`
+- `src/tui/widgets/help.rs`
+- `src/main.rs`
+- `docs/agents/panko-m5/prd.json`
+- `docs/agents/panko-m5/PROGRESS.md`
+
+---
+
+## Milestone 5 Complete! 🎉
+
+All 8 stories have been completed. The daemon-based sharing architecture is now fully implemented:
+
+### What's New
+- **Persistent shares**: Shares now survive TUI restarts - close panko, reopen it, and your shares are still running
+- **Daemon process**: `panko serve` runs a background daemon that manages all share lifecycles
+- **SQLite storage**: Share state persisted to `~/.local/share/panko/state.db`
+- **Unix socket IPC**: TUI communicates with daemon via `~/.local/share/panko/daemon.sock`
+- **Auto-start**: Daemon automatically starts when needed (first share creation)
+- **Reconnection**: TUI reconnects to existing shares on startup
+- **Recovery**: 'R' key allows manual reconnection after failures
+
+### CLI Commands
+- `panko serve` - Start daemon (daemonizes by default)
+- `panko serve --foreground` - Run daemon in foreground
+- `panko serve-stop` - Stop the daemon
+- `panko serve-status` - Show daemon status and active shares
+
+### Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          TUI Process                             │
+│  ┌──────────────────┐     ┌──────────────────────────────────┐  │
+│  │   App State      │────▶│   DaemonClient                   │  │
+│  │   (UI only)      │     │   - Unix socket connection       │  │
+│  └──────────────────┘     └──────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                                        │ Unix Socket IPC
+                                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       Daemon Process                             │
+│                    `panko serve`                                 │
+│  ┌──────────────────┐     ┌──────────────────────────────────┐  │
+│  │   ShareService   │────▶│   SQLite State                   │  │
+│  │   - Manage shares│     │   ~/.local/share/panko/state.db  │  │
+│  └──────────────────┘     └──────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+<!-- Milestone 5 complete -->
