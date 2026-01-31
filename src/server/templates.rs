@@ -91,9 +91,13 @@ pub struct BlockView {
     /// Tool input (for ToolCall).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<serde_json::Value>,
-    /// Tool output (for ToolCall).
+    /// Tool output (for ToolCall) - structured JSON only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
+    /// Tool output as plain text (for ToolCall) - string outputs only.
+    /// This preserves actual newlines instead of escaping them as \n.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_text: Option<String>,
     /// Number of lines in the output JSON (for large output detection).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_lines: Option<usize>,
@@ -134,6 +138,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_text: None,
                 output_lines: None,
                 path: None,
                 diff: None,
@@ -151,6 +156,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_text: None,
                 output_lines: None,
                 path: None,
                 diff: None,
@@ -168,6 +174,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_text: None,
                 output_lines: None,
                 path: None,
                 diff: None,
@@ -184,29 +191,33 @@ impl BlockView {
                 output,
                 timestamp,
             } => {
+                // Separate string outputs from structured JSON outputs.
+                // String outputs go to output_text (preserves newlines).
+                // Objects/arrays go to output (rendered as JSON).
+                let (output_text, output_json): (Option<String>, Option<serde_json::Value>) =
+                    match output {
+                        Some(serde_json::Value::String(s)) => (Some(s.clone()), None),
+                        other => (None, other.clone()),
+                    };
+
                 // Count lines in the output for large output detection.
-                // For string values, count content lines (including escaped \n).
+                // For string values, count content lines.
                 // For objects/arrays, count JSON lines when pretty-printed.
-                let output_lines = output.as_ref().map(|o| {
-                    match o {
-                        serde_json::Value::String(s) => {
-                            // Count actual newlines plus escaped \n sequences
-                            let actual_newlines = s.lines().count();
-                            let escaped_newlines = s.matches("\\n").count();
-                            actual_newlines + escaped_newlines
-                        }
-                        _ => serde_json::to_string_pretty(o)
-                            .map(|s| s.lines().count())
-                            .unwrap_or(0),
-                    }
+                let output_lines = output.as_ref().map(|o| match o {
+                    serde_json::Value::String(s) => s.lines().count(),
+                    _ => serde_json::to_string_pretty(o)
+                        .map(|s| s.lines().count())
+                        .unwrap_or(0),
                 });
+
                 Self {
                     block_type: "tool_call".to_string(),
                     timestamp: timestamp.to_rfc3339(),
                     content_html: None,
                     name: Some(name.clone()),
                     input: Some(input.clone()),
-                    output: output.clone(),
+                    output: output_json,
+                    output_text,
                     output_lines,
                     path: None,
                     diff: None,
@@ -229,6 +240,7 @@ impl BlockView {
                 name: None,
                 input: None,
                 output: None,
+                output_text: None,
                 output_lines: None,
                 path: Some(path.clone()),
                 diff: Some(diff.clone()),
@@ -260,6 +272,7 @@ impl BlockView {
                     name: None,
                     input: None,
                     output: None,
+                    output_text: None,
                     output_lines: None,
                     path: None,
                     diff: None,
@@ -405,19 +418,19 @@ mod tests {
     }
 
     #[test]
-    fn test_block_view_tool_call_output_lines_escaped_string() {
+    fn test_block_view_tool_call_output_lines_counts_actual_newlines() {
         let ts = test_timestamp();
-        // Create a string with escaped newlines (like JSON-encoded content)
-        // This simulates: {"content": "line 1\nline 2\nline 3"}
+        // Create a string that contains literal backslash-n (not actual newlines)
+        // This tests that we only count actual newlines, not escaped sequences
         let output = serde_json::json!(r#"{"content": "line 1\nline 2\nline 3"}"#);
         let block = Block::tool_call("Read", serde_json::json!({}), Some(output), ts);
         let view = BlockView::from_block(&block);
 
-        // Should count escaped \n sequences
+        // Only count actual newlines, not escaped \n sequences
         assert!(view.output_lines.is_some());
         let lines = view.output_lines.unwrap();
-        // 1 actual line + 2 escaped \n = 3
-        assert_eq!(lines, 3, "Expected 3 lines, got {}", lines);
+        // No actual newlines in this string, so just 1 line
+        assert_eq!(lines, 1, "Expected 1 line, got {}", lines);
     }
 
     #[test]
@@ -644,5 +657,101 @@ mod tests {
         assert!(html.contains("Explore codebase")); // Description
         assert!(html.contains("Found main.rs")); // Result
         assert!(html.contains("<strong>important</strong>")); // Markdown in prompt
+    }
+
+    #[test]
+    fn test_block_view_tool_call_string_output_uses_output_text() {
+        let ts = test_timestamp();
+        // String output should go to output_text, not output
+        let output = serde_json::json!("line 1\nline 2\nline 3");
+        let block = Block::tool_call(
+            "Read",
+            serde_json::json!({"path": "/test"}),
+            Some(output),
+            ts,
+        );
+        let view = BlockView::from_block(&block);
+
+        assert_eq!(view.block_type, "tool_call");
+        assert!(
+            view.output_text.is_some(),
+            "String output should be in output_text"
+        );
+        assert!(
+            view.output.is_none(),
+            "output should be None for string outputs"
+        );
+        assert_eq!(view.output_text.unwrap(), "line 1\nline 2\nline 3");
+    }
+
+    #[test]
+    fn test_block_view_tool_call_json_output_uses_output() {
+        let ts = test_timestamp();
+        // JSON object output should go to output, not output_text
+        let output = serde_json::json!({"key": "value", "nested": {"a": 1}});
+        let block = Block::tool_call("SomeTool", serde_json::json!({}), Some(output.clone()), ts);
+        let view = BlockView::from_block(&block);
+
+        assert!(
+            view.output.is_some(),
+            "JSON object output should be in output"
+        );
+        assert!(
+            view.output_text.is_none(),
+            "output_text should be None for JSON objects"
+        );
+        assert_eq!(view.output.unwrap(), output);
+    }
+
+    #[test]
+    fn test_block_view_tool_call_array_output_uses_output() {
+        let ts = test_timestamp();
+        // JSON array output should go to output, not output_text
+        let output = serde_json::json!(["item1", "item2", "item3"]);
+        let block = Block::tool_call("ListTool", serde_json::json!({}), Some(output.clone()), ts);
+        let view = BlockView::from_block(&block);
+
+        assert!(
+            view.output.is_some(),
+            "JSON array output should be in output"
+        );
+        assert!(
+            view.output_text.is_none(),
+            "output_text should be None for JSON arrays"
+        );
+        assert_eq!(view.output.unwrap(), output);
+    }
+
+    #[test]
+    fn test_render_session_with_string_tool_output() {
+        let ts = test_timestamp();
+        let mut session = Session::new("test-session", ts);
+
+        // Add a tool call with multiline string output (like Read tool)
+        session.add_block(Block::tool_call(
+            "Read",
+            serde_json::json!({"path": "/test/file.rs"}),
+            Some(serde_json::json!(
+                "fn main() {\n    println!(\"Hello\");\n}"
+            )),
+            ts,
+        ));
+
+        let engine = TemplateEngine::new().unwrap();
+        let html = engine.render_session(&session);
+
+        assert!(html.is_ok(), "render_session failed: {:?}", html.err());
+        let html = html.unwrap();
+
+        // The output should contain actual newlines, not escaped \n
+        // Note: HTML escapes quotes as &quot;
+        assert!(
+            html.contains("fn main() {\n"),
+            "HTML should contain actual newlines, not escaped \\n"
+        );
+        assert!(
+            html.contains("println!(&quot;Hello&quot;);"),
+            "HTML should contain the code content (with HTML-escaped quotes)"
+        );
     }
 }

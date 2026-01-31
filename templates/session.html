@@ -76,7 +76,22 @@
                     <pre class="tool-input json-code"><code>{{ block.input | tojson(indent=2) }}</code></pre>
                 </div>
             </details>
-            {% if block.output %}
+            {% if block.output_text %}
+            {% set is_large_output = block.output_lines and block.output_lines > 100 %}
+            <details class="tool-details"{% if important_tool and not is_large_output %} open{% endif %}>
+                <summary>
+                    <span class="summary-text">Output{% if is_large_output %} ({{ block.output_lines }} lines){% endif %}</span>
+                    <button type="button" class="copy-btn" data-copy-target="output" title="Copy to clipboard">Copy</button>
+                </summary>
+                <div class="tool-code-wrapper{% if is_large_output %} large-output collapsed{% endif %}"{% if block.output_lines %} data-full-lines="{{ block.output_lines }}"{% endif %}>
+                    <pre class="tool-output"><code>{{ block.output_text }}</code></pre>
+                    {% if is_large_output %}
+                    <div class="output-fade"></div>
+                    <button type="button" class="show-full-btn">Show full output</button>
+                    {% endif %}
+                </div>
+            </details>
+            {% elif block.output %}
             {% set is_large_output = block.output_lines and block.output_lines > 100 %}
             <details class="tool-details"{% if important_tool and not is_large_output %} open{% endif %}>
                 <summary>

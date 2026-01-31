@@ -41,7 +41,12 @@
         <summary>Input</summary>
         <pre class="tool-input"><code>{{ block.input | tojson(indent=2) }}</code></pre>
     </details>
-    {% if block.output %}
+    {% if block.output_text %}
+    <details class="tool-details">
+        <summary>Output</summary>
+        <pre class="tool-output"><code>{{ block.output_text }}</code></pre>
+    </details>
+    {% elif block.output %}
     <details class="tool-details">
         <summary>Output</summary>
         <pre class="tool-output"><code>{{ block.output | tojson(indent=2) }}</code></pre>
