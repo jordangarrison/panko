@@ -304,4 +304,93 @@ Created the `DaemonClient` struct that provides a high-level interface for the T
 
 ---
 
+## 2026-01-31: Story 7 - Integrate daemon client into TUI
+
+### Summary
+Integrated the daemon client into the TUI, replacing thread-based sharing with daemon IPC. The TUI now uses the daemon for all share operations when daemon sharing is enabled (by default).
+
+### Changes
+
+#### New Files
+- Created `src/tui/daemon_bridge.rs` with:
+  - `DaemonMessage` enum for messages between daemon tasks and TUI
+  - `DaemonShareHandle` for tracking pending daemon share operations
+  - `DaemonActiveShare` struct mirroring daemon's ShareInfo for TUI display
+  - `DaemonShareManager` for managing daemon-based shares in TUI:
+    - Tracks active shares by daemon UUID
+    - Manages pending share handles
+    - Navigation support for shares panel (select_next, select_previous)
+    - Methods: `can_add_share()`, `active_count()`, `active_shares()`, etc.
+  - `start_share_via_daemon()` - Spawns background thread to start share via daemon
+  - `stop_share_via_daemon()` - Spawns background thread to stop share via daemon
+  - `fetch_shares_from_daemon()` - Fetches share list from daemon
+  - `check_daemon_connection()` - Verifies daemon connectivity
+
+#### Modified Files
+
+**src/tui/app.rs**:
+- Added `daemon_share_manager: DaemonShareManager` field
+- Added `use_daemon_sharing: bool` field (defaults to true)
+- Added `pending_daemon_share_path: Option<PathBuf>` field
+- Updated `can_add_share()` to check daemon manager when enabled
+- Updated `active_share_count()` to use daemon manager when enabled
+- Added `has_any_active_shares()` to check both managers
+- Added `is_session_shared_anywhere()` to check both managers
+- Added `daemon_share_manager()` and `daemon_share_manager_mut()` accessors
+- Added `is_daemon_sharing_enabled()` and `set_daemon_sharing_enabled()` methods
+- Added `set_pending_daemon_share()` and `has_pending_daemon_share()` methods
+- Added `selected_daemon_share()` method
+- Added `get_all_shares_as_active()` for converting daemon shares to legacy format
+- Updated `process_share_messages()` to also poll daemon messages
+- Added `process_daemon_share_messages()` for handling daemon-specific messages
+- Updated `handle_shares_panel_key()` for daemon share navigation and actions
+- Updated `render_shares_panel()` to support both modes
+- Updated `toggle_shares_panel()` for daemon mode
+- Updated `stop_all_shares()` to clear daemon manager
+- Updated `clear_sharing_state()` to clear daemon pending share
+- Updated delete session check to use `is_session_shared_anywhere()`
+- Updated tests to disable daemon sharing where appropriate
+
+**src/tui/actions.rs**:
+- Added `StopDaemonShare(ShareId)` action variant for stopping daemon shares
+
+**src/tui/mod.rs**:
+- Added `daemon_bridge` module export
+- Re-exported daemon bridge types
+
+**src/main.rs**:
+- Added imports for daemon bridge functions
+- Updated `Action::ShareSession` handling to use daemon when enabled
+- Updated `Action::StartSharing` handling to use daemon when enabled
+- Added handler for `Action::StopDaemonShare`
+
+### Architecture
+The integration uses a dual-mode approach:
+- When `use_daemon_sharing` is true (default): Uses DaemonClient via background threads
+- When false: Falls back to legacy thread-based SharingHandle
+
+The daemon bridge spawns background threads that:
+1. Create a tokio runtime
+2. Connect to daemon (auto-starting if needed)
+3. Send requests (StartShare, StopShare, etc.)
+4. Return results via channels that TUI polls in `process_share_messages()`
+
+### Validation Results
+- [x] `cargo build` - PASSED
+- [x] `cargo test` - PASSED (665 tests)
+- [x] `cargo clippy` - PASSED (no warnings from changes)
+- [x] `cargo fmt --check` - PASSED
+
+### Files Created
+- `src/tui/daemon_bridge.rs`
+
+### Files Modified
+- `src/tui/mod.rs`
+- `src/tui/app.rs`
+- `src/tui/actions.rs`
+- `src/main.rs`
+- `docs/agents/panko-m5/prd.json`
+
+---
+
 <!-- Work entries will be added above as stories are completed -->

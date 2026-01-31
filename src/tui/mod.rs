@@ -5,6 +5,7 @@
 
 mod actions;
 mod app;
+pub mod daemon_bridge;
 mod events;
 pub mod sharing;
 pub mod watcher;
@@ -14,6 +15,10 @@ pub use actions::Action;
 pub use app::{
     App, AppResult, FocusedPanel, RefreshState, SharingState, DEFAULT_MAX_SHARES, MIN_HEIGHT,
     MIN_WIDTH,
+};
+pub use daemon_bridge::{
+    check_daemon_connection, fetch_shares_from_daemon, start_share_via_daemon,
+    stop_share_via_daemon, DaemonActiveShare, DaemonMessage, DaemonShareHandle, DaemonShareManager,
 };
 pub use events::{Event, EventHandler};
 pub use sharing::{

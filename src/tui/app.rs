@@ -2,6 +2,7 @@
 
 use crate::scanner::{ScannerRegistry, SessionMeta};
 use crate::tui::actions::Action;
+use crate::tui::daemon_bridge::{DaemonMessage, DaemonShareManager};
 use crate::tui::sharing::{ShareId, ShareManager, SharingMessage};
 use crate::tui::widgets::{
     ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
@@ -166,10 +167,16 @@ pub struct App {
     refresh_state: RefreshState,
     /// Current confirmation state (for delete dialog)
     confirmation_state: ConfirmationState,
-    /// Manager for multiple concurrent shares
+    /// Manager for multiple concurrent shares (legacy thread-based)
     share_manager: ShareManager,
+    /// Daemon-based share manager (new daemon-based sharing)
+    daemon_share_manager: DaemonShareManager,
+    /// Whether to use daemon-based sharing (enabled by default)
+    use_daemon_sharing: bool,
     /// The share ID currently being started (waiting for Started message)
     pending_share_id: Option<ShareId>,
+    /// The daemon share ID for pending daemon share
+    pending_daemon_share_path: Option<PathBuf>,
     /// The session path for the pending share
     pending_share_path: Option<PathBuf>,
     /// The provider name for the pending share
@@ -207,7 +214,10 @@ impl App {
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
             share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            daemon_share_manager: DaemonShareManager::new(DEFAULT_MAX_SHARES),
+            use_daemon_sharing: true, // Enable daemon sharing by default
             pending_share_id: None,
+            pending_daemon_share_path: None,
             pending_share_path: None,
             pending_share_provider: None,
             share_modal_state: None,
@@ -234,7 +244,10 @@ impl App {
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
             share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            daemon_share_manager: DaemonShareManager::new(DEFAULT_MAX_SHARES),
+            use_daemon_sharing: true, // Enable daemon sharing by default
             pending_share_id: None,
+            pending_daemon_share_path: None,
             pending_share_path: None,
             pending_share_provider: None,
             share_modal_state: None,
@@ -468,7 +481,7 @@ impl App {
             KeyCode::Char('d') => {
                 if let Some(session) = self.selected_session() {
                     // Cannot delete a session that is currently being shared
-                    if self.share_manager.is_session_shared(&session.path) {
+                    if self.is_session_shared_anywhere(&session.path) {
                         self.set_status_message("✗ Cannot delete: session is being shared");
                     } else {
                         self.confirmation_state = ConfirmationState::ConfirmingDelete {
@@ -710,6 +723,7 @@ impl App {
     pub fn clear_sharing_state(&mut self) {
         self.sharing_state = SharingState::Inactive;
         self.pending_share_id = None;
+        self.pending_daemon_share_path = None;
         self.pending_share_path = None;
         self.pending_share_provider = None;
     }
@@ -724,14 +738,54 @@ impl App {
         &mut self.share_manager
     }
 
-    /// Check if we can start a new share (not at max capacity).
-    pub fn can_add_share(&self) -> bool {
-        self.share_manager.can_add_share()
+    /// Get a reference to the daemon share manager.
+    pub fn daemon_share_manager(&self) -> &DaemonShareManager {
+        &self.daemon_share_manager
     }
 
-    /// Get the number of active shares.
+    /// Get a mutable reference to the daemon share manager.
+    pub fn daemon_share_manager_mut(&mut self) -> &mut DaemonShareManager {
+        &mut self.daemon_share_manager
+    }
+
+    /// Check if daemon sharing is enabled.
+    pub fn is_daemon_sharing_enabled(&self) -> bool {
+        self.use_daemon_sharing
+    }
+
+    /// Enable or disable daemon sharing.
+    pub fn set_daemon_sharing_enabled(&mut self, enabled: bool) {
+        self.use_daemon_sharing = enabled;
+    }
+
+    /// Check if we can start a new share (not at max capacity).
+    /// Checks both legacy and daemon share managers.
+    pub fn can_add_share(&self) -> bool {
+        if self.use_daemon_sharing {
+            self.daemon_share_manager.can_add_share()
+        } else {
+            self.share_manager.can_add_share()
+        }
+    }
+
+    /// Get the number of active shares (from both managers).
     pub fn active_share_count(&self) -> usize {
-        self.share_manager.active_count()
+        if self.use_daemon_sharing {
+            self.daemon_share_manager.active_count()
+        } else {
+            self.share_manager.active_count()
+        }
+    }
+
+    /// Check if there are any active shares (from either manager).
+    pub fn has_any_active_shares(&self) -> bool {
+        self.share_manager.has_active_shares() || self.daemon_share_manager.has_active_shares()
+    }
+
+    /// Check if a session is shared (via either manager).
+    pub fn is_session_shared_anywhere(&self, path: &std::path::Path) -> bool {
+        self.share_manager.is_session_shared(path)
+            || self.daemon_share_manager.is_session_shared(path)
     }
 
     /// Set the pending share info (when starting a new share).
@@ -748,7 +802,7 @@ impl App {
 
     /// Check if there's a pending share waiting for a Started message.
     pub fn has_pending_share(&self) -> bool {
-        self.pending_share_id.is_some()
+        self.pending_share_id.is_some() || self.pending_daemon_share_path.is_some()
     }
 
     /// Clear the pending share info and return the values.
@@ -770,9 +824,13 @@ impl App {
 
     /// Stop all active shares.
     pub fn stop_all_shares(&mut self) {
+        // Stop legacy shares
         self.share_manager.stop_all();
+        // Clear daemon share manager (shares in daemon are not stopped - they persist)
+        self.daemon_share_manager.clear();
         self.sharing_state = SharingState::Inactive;
         self.pending_share_id = None;
+        self.pending_daemon_share_path = None;
         self.pending_share_path = None;
         self.pending_share_provider = None;
     }
@@ -822,6 +880,7 @@ impl App {
     /// share state transitions without leaving the alternate screen,
     /// which prevents screen flickering.
     pub fn process_share_messages(&mut self) {
+        // Process legacy share manager messages
         let messages = self.share_manager.poll_messages();
         let mut shares_to_remove: Vec<ShareId> = Vec::new();
 
@@ -871,6 +930,82 @@ impl App {
                 self.clear_sharing_state();
             }
         }
+
+        // Process daemon share manager messages
+        if self.use_daemon_sharing {
+            self.process_daemon_share_messages();
+        }
+    }
+
+    /// Process pending share messages from daemon bridge.
+    fn process_daemon_share_messages(&mut self) {
+        let messages = self.daemon_share_manager.poll_messages();
+
+        for msg in messages {
+            match msg {
+                DaemonMessage::ShareStarted { info } => {
+                    // Copy URL to clipboard
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&info.public_url);
+                    }
+                    // Handle pending share state transitions
+                    if let Some(pending_path) = self.pending_daemon_share_path.take() {
+                        if pending_path == info.session_path {
+                            let session_name = info.session_name.clone();
+                            let url = info.public_url.clone();
+                            let provider = info.provider_name.clone();
+                            self.set_sharing_active(url.clone(), provider.clone());
+                            self.show_share_modal(session_name, url, provider);
+                        }
+                    }
+                    // Clear legacy pending share state too
+                    self.pending_share_id = None;
+                    self.pending_share_path = None;
+                    self.pending_share_provider = None;
+                }
+                DaemonMessage::ShareFailed { error } => {
+                    tracing::error!(error = %error, "Daemon share failed");
+                    self.set_status_message(format!("Share failed: {}", error));
+                    self.pending_daemon_share_path = None;
+                    self.clear_sharing_state();
+                }
+                DaemonMessage::ShareStopped { share_id } => {
+                    self.daemon_share_manager.mark_stopped(share_id);
+                    if !self.daemon_share_manager.has_active_shares() {
+                        self.clear_sharing_state();
+                    }
+                }
+                DaemonMessage::ShareListReceived { shares } => {
+                    // Update daemon share manager with latest shares from daemon
+                    self.daemon_share_manager.update_from_daemon(shares);
+                }
+                DaemonMessage::Connected => {
+                    tracing::info!("Connected to daemon");
+                }
+                DaemonMessage::ConnectionFailed { error } => {
+                    tracing::warn!(error = %error, "Failed to connect to daemon");
+                    // Fall back to legacy sharing
+                    self.use_daemon_sharing = false;
+                }
+                DaemonMessage::Error { message } => {
+                    tracing::error!(error = %message, "Daemon error");
+                    self.set_status_message(format!("Daemon error: {}", message));
+                }
+            }
+        }
+    }
+
+    /// Set the pending daemon share path (when starting a daemon share).
+    pub fn set_pending_daemon_share(&mut self, path: PathBuf, provider: String) {
+        self.pending_daemon_share_path = Some(path.clone());
+        // Also set legacy fields for UI state
+        self.pending_share_path = Some(path);
+        self.pending_share_provider = Some(provider);
+    }
+
+    /// Check if there's a pending daemon share.
+    pub fn has_pending_daemon_share(&self) -> bool {
+        self.pending_daemon_share_path.is_some()
     }
 
     /// Set a status message to display in the footer.
@@ -937,21 +1072,39 @@ impl App {
         match key_event.code {
             // Navigation
             KeyCode::Char('j') | KeyCode::Down => {
-                self.shares_panel_state.select_next();
+                if self.use_daemon_sharing {
+                    self.daemon_share_manager.select_next();
+                } else {
+                    self.shares_panel_state.select_next();
+                }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.shares_panel_state.select_previous();
+                if self.use_daemon_sharing {
+                    self.daemon_share_manager.select_previous();
+                } else {
+                    self.shares_panel_state.select_previous();
+                }
             }
             // Enter: copy selected share's URL
             KeyCode::Enter => {
-                if let Some(share) = self.selected_active_share() {
+                if self.use_daemon_sharing {
+                    if let Some(share) = self.selected_daemon_share() {
+                        self.pending_action = Action::CopyShareUrl(share.public_url.clone());
+                        self.set_status_message("✓ URL copied to clipboard");
+                    }
+                } else if let Some(share) = self.selected_active_share() {
                     self.pending_action = Action::CopyShareUrl(share.public_url.clone());
                     self.set_status_message("✓ URL copied to clipboard");
                 }
             }
             // d: stop selected share
             KeyCode::Char('d') => {
-                if let Some(share) = self.selected_active_share() {
+                if self.use_daemon_sharing {
+                    if let Some(share) = self.selected_daemon_share() {
+                        let id = share.daemon_id;
+                        self.pending_action = Action::StopDaemonShare(id);
+                    }
+                } else if let Some(share) = self.selected_active_share() {
                     let id = share.id;
                     self.pending_action = Action::StopShareById(id);
                 }
@@ -978,14 +1131,23 @@ impl App {
     pub fn toggle_shares_panel(&mut self) {
         self.show_shares_panel = !self.show_shares_panel;
         if self.show_shares_panel {
-            let shares = self.share_manager.shares();
+            // Get shares from appropriate manager
+            let share_count = if self.use_daemon_sharing {
+                self.daemon_share_manager.active_count()
+            } else {
+                self.share_manager.shares().len()
+            };
             tracing::info!(
-                share_count = shares.len(),
+                share_count = share_count,
+                use_daemon = self.use_daemon_sharing,
                 "toggle_shares_panel: Opening with {} shares",
-                shares.len()
+                share_count
             );
             // Update the shares panel state with current shares
-            self.shares_panel_state.update(shares);
+            // Note: For daemon shares, we update via get_all_shares_as_active()
+            if !self.use_daemon_sharing {
+                self.shares_panel_state.update(self.share_manager.shares());
+            }
         }
     }
 
@@ -995,10 +1157,43 @@ impl App {
     }
 
     /// Get the currently selected active share (for shares panel).
+    /// Returns the legacy ActiveShare for backwards compatibility with the widget.
     pub fn selected_active_share(&self) -> Option<&crate::tui::sharing::ActiveShare> {
-        let shares = self.share_manager.shares();
-        let idx = self.shares_panel_state.selected();
-        shares.get(idx)
+        if self.use_daemon_sharing {
+            // For daemon shares, we can't return a reference since we need to create
+            // ActiveShare on the fly. Return None and use selected_daemon_share() instead.
+            None
+        } else {
+            let shares = self.share_manager.shares();
+            let idx = self.shares_panel_state.selected();
+            shares.get(idx)
+        }
+    }
+
+    /// Get the currently selected daemon share.
+    pub fn selected_daemon_share(&self) -> Option<&crate::tui::daemon_bridge::DaemonActiveShare> {
+        self.daemon_share_manager.selected_share()
+    }
+
+    /// Get all shares as legacy ActiveShare format (for backwards compatibility).
+    /// This creates new ActiveShare objects from daemon shares.
+    pub fn get_all_shares_as_active(&self) -> Vec<crate::tui::sharing::ActiveShare> {
+        if self.use_daemon_sharing {
+            self.daemon_share_manager
+                .active_shares()
+                .iter()
+                .map(|ds| {
+                    crate::tui::sharing::ActiveShare::new(
+                        ShareId::new(), // Generate a temporary ID for display
+                        ds.session_path.clone(),
+                        ds.public_url.clone(),
+                        ds.provider_name.clone(),
+                    )
+                })
+                .collect()
+        } else {
+            self.share_manager.shares().to_vec()
+        }
     }
 
     /// Remove a session from the list by its file path.
@@ -1066,11 +1261,19 @@ impl App {
 
     /// Render the shares panel.
     fn render_shares_panel(&mut self, frame: &mut Frame, area: Rect) {
-        // Always sync shares state before rendering to ensure panel is up-to-date
-        self.shares_panel_state.update(self.share_manager.shares());
-        let shares = self.share_manager.shares();
-        let widget = SharesPanel::new(shares);
-        frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
+        if self.use_daemon_sharing {
+            // For daemon shares, convert to ActiveShare format for the widget
+            let shares = self.get_all_shares_as_active();
+            self.shares_panel_state.update(&shares);
+            let widget = SharesPanel::new(&shares);
+            frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
+        } else {
+            // Legacy mode: use share_manager directly
+            self.shares_panel_state.update(self.share_manager.shares());
+            let shares = self.share_manager.shares();
+            let widget = SharesPanel::new(shares);
+            frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
+        }
     }
 
     /// Render the share started modal.
@@ -3166,6 +3369,8 @@ mod tests {
     #[test]
     fn test_app_share_manager_mut_allows_modification() {
         let mut app = App::new();
+        // Disable daemon sharing for this test to use legacy share manager
+        app.set_daemon_sharing_enabled(false);
 
         // Mark a share as started
         let id = ShareId::new();
@@ -3196,6 +3401,8 @@ mod tests {
     #[test]
     fn test_app_can_add_share_respects_max() {
         let mut app = App::new();
+        // Disable daemon sharing for this test to use legacy share manager
+        app.set_daemon_sharing_enabled(false);
         app.set_max_shares(2);
 
         // Initially can add

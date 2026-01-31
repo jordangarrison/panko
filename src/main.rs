@@ -15,6 +15,7 @@ use panko::server::{
     run_server_with_source, shutdown_signal, start_server_with_source, ServerConfig,
 };
 use panko::tui;
+use panko::tui::daemon_bridge::{start_share_via_daemon, stop_share_via_daemon, DaemonMessage};
 use panko::tunnel::{detect_available_providers, get_provider_with_config, AvailableProvider};
 
 #[derive(Parser)]
@@ -549,17 +550,24 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
                 // Only one provider - start sharing immediately
                 let provider = &providers[0];
                 tracing::info!(path = ?path, provider = %provider.name, "Starting share");
-                let share_id = tui::ShareId::new();
-                let handle = tui::SharingHandle::start(path.clone(), provider.name.clone());
 
-                // Track pending share (waiting for Started message)
-                app.set_pending_share(share_id, path.clone(), provider.name.clone());
-                app.share_manager_mut().add_pending_share(
-                    share_id,
-                    path.clone(),
-                    provider.name.clone(),
-                    handle,
-                );
+                if app.is_daemon_sharing_enabled() {
+                    // Use daemon-based sharing
+                    let handle = start_share_via_daemon(path.clone(), provider.name.clone());
+                    app.set_pending_daemon_share(path.clone(), provider.name.clone());
+                    app.daemon_share_manager_mut().add_pending(handle);
+                } else {
+                    // Fall back to legacy thread-based sharing
+                    let share_id = tui::ShareId::new();
+                    let handle = tui::SharingHandle::start(path.clone(), provider.name.clone());
+                    app.set_pending_share(share_id, path.clone(), provider.name.clone());
+                    app.share_manager_mut().add_pending_share(
+                        share_id,
+                        path.clone(),
+                        provider.name.clone(),
+                        handle,
+                    );
+                }
 
                 // Set UI state to Starting
                 app.set_sharing_active("Starting...".to_string(), provider.name.clone());
@@ -571,17 +579,24 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
         tui::Action::StartSharing { path, provider } => {
             // Start sharing with the selected provider
             tracing::info!(path = ?path, provider = %provider, "Starting share");
-            let share_id = tui::ShareId::new();
-            let handle = tui::SharingHandle::start(path.clone(), provider.clone());
 
-            // Track pending share
-            app.set_pending_share(share_id, path.clone(), provider.clone());
-            app.share_manager_mut().add_pending_share(
-                share_id,
-                path.clone(),
-                provider.clone(),
-                handle,
-            );
+            if app.is_daemon_sharing_enabled() {
+                // Use daemon-based sharing
+                let handle = start_share_via_daemon(path.clone(), provider.clone());
+                app.set_pending_daemon_share(path.clone(), provider.clone());
+                app.daemon_share_manager_mut().add_pending(handle);
+            } else {
+                // Fall back to legacy thread-based sharing
+                let share_id = tui::ShareId::new();
+                let handle = tui::SharingHandle::start(path.clone(), provider.clone());
+                app.set_pending_share(share_id, path.clone(), provider.clone());
+                app.share_manager_mut().add_pending_share(
+                    share_id,
+                    path.clone(),
+                    provider.clone(),
+                    handle,
+                );
+            }
         }
         tui::Action::StopSharing => {
             // Stop all active shares (legacy behavior for single Esc press)
@@ -668,7 +683,7 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
             }
         }
         tui::Action::StopShareById(id) => {
-            // Stop a specific share by its ID
+            // Stop a specific share by its ID (legacy thread-based)
             app.stop_share(*id);
             // Update the shares panel state
             if app.is_shares_panel_showing() {
@@ -677,6 +692,20 @@ fn handle_tui_action(action: &tui::Action, app: &mut tui::App) -> Result<()> {
                     // Close panel if no more shares
                     app.toggle_shares_panel();
                 }
+            }
+            app.set_status_message("✓ Share stopped");
+        }
+        tui::Action::StopDaemonShare(id) => {
+            // Stop a daemon share by its UUID
+            tracing::info!(share_id = %id, "Stopping daemon share");
+            // Create a channel to receive the stop result
+            let (tx, _rx) = std::sync::mpsc::channel::<DaemonMessage>();
+            stop_share_via_daemon(*id, tx);
+            // Mark as stopped in local state
+            app.daemon_share_manager_mut().mark_stopped(*id);
+            // Update the shares panel state - close if no more shares
+            if app.is_shares_panel_showing() && !app.daemon_share_manager().has_active_shares() {
+                app.toggle_shares_panel();
             }
             app.set_status_message("✓ Share stopped");
         }

@@ -102,7 +102,7 @@
       "title": "Integrate daemon client into TUI",
       "description": "Replace thread-based sharing with daemon IPC",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "TUI auto-starts daemon on launch if not running",
         "Action::StartSharing uses DaemonClient instead of SharingHandle",
