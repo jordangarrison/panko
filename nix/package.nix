@@ -93,5 +93,10 @@
         panko = defaultPanko;
         panko-unwrapped = panko;
       };
+
+      apps.default = {
+        type = "app";
+        program = "${defaultPanko}/bin/panko";
+      };
     };
 }
