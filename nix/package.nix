@@ -1,5 +1,18 @@
 { inputs, ... }:
 {
+  flake = {
+    overlays.default = final: prev: {
+      panko = final.callPackage (
+        { lib, stdenv, cloudflared, ngrok, tailscale, wl-clipboard, xclip, makeWrapper }:
+        let
+          system = final.stdenv.hostPlatform.system;
+          pankoPackages = inputs.self.packages.${system};
+        in
+        pankoPackages.default
+      ) {};
+    };
+  };
+
   perSystem = { config, self', inputs', pkgs, system, lib, ... }:
     let
       rustToolchain = pkgs.rust-bin.stable.latest.default;
