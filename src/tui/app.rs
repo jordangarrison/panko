@@ -19,7 +19,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 /// Default maximum number of concurrent shares.
-pub const DEFAULT_MAX_SHARES: usize = 5;
+pub const DEFAULT_MAX_SHARES: usize = 100;
 
 /// Default auto-clear timeout for status messages.
 pub const STATUS_MESSAGE_TIMEOUT: Duration = Duration::from_secs(3);
