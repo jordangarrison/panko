@@ -43,11 +43,42 @@
         # are validated outside of nix via `cargo test`.
         doCheck = false;
       });
+
+      wrappedPanko = {
+        withCloudflared ? true,
+        withNgrok ? false,
+        withTailscale ? false,
+        withClipboard ? true,
+      }:
+        let
+          runtimeDeps = lib.flatten [
+            (lib.optional withCloudflared pkgs.cloudflared)
+            (lib.optional withNgrok pkgs.ngrok)
+            (lib.optional withTailscale pkgs.tailscale)
+            (lib.optionals (withClipboard && pkgs.stdenv.isLinux) [
+              pkgs.wl-clipboard
+              pkgs.xclip
+            ])
+          ];
+        in
+        if runtimeDeps == [] then panko
+        else pkgs.symlinkJoin {
+          name = "panko-${panko.version or "0.1.0"}";
+          paths = [ panko ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/panko \
+              --prefix PATH : ${lib.makeBinPath runtimeDeps}
+          '';
+        };
+
+      defaultPanko = lib.makeOverridable wrappedPanko {};
     in
     {
       packages = {
-        default = panko;
-        panko = panko;
+        default = defaultPanko;
+        panko = defaultPanko;
+        panko-unwrapped = panko;
       };
     };
 }
