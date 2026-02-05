@@ -2,6 +2,7 @@
 
 use crate::scanner::{ScannerRegistry, SessionMeta};
 use crate::tui::actions::Action;
+use crate::tui::daemon_bridge::{DaemonMessage, DaemonShareManager};
 use crate::tui::sharing::{ShareId, ShareManager, SharingMessage};
 use crate::tui::widgets::{
     ConfirmationDialog, HelpOverlay, PreviewPanel, ProviderOption, ProviderSelect,
@@ -14,6 +15,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 /// Default maximum number of concurrent shares.
@@ -135,6 +137,54 @@ impl RefreshState {
     }
 }
 
+/// State of daemon connection for share reconnection.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DaemonConnectionState {
+    /// Haven't attempted to connect yet.
+    #[default]
+    NotConnected,
+    /// Currently connecting to daemon.
+    Connecting,
+    /// Connected and shares have been fetched.
+    Connected,
+    /// Daemon is not running.
+    DaemonNotRunning,
+    /// Connection failed with an error.
+    Failed {
+        /// The error message.
+        error: String,
+    },
+}
+
+impl DaemonConnectionState {
+    /// Check if connection is in progress.
+    pub fn is_connecting(&self) -> bool {
+        matches!(self, DaemonConnectionState::Connecting)
+    }
+
+    /// Check if we're connected to the daemon.
+    pub fn is_connected(&self) -> bool {
+        matches!(self, DaemonConnectionState::Connected)
+    }
+
+    /// Check if connection failed.
+    pub fn is_failed(&self) -> bool {
+        matches!(
+            self,
+            DaemonConnectionState::Failed { .. } | DaemonConnectionState::DaemonNotRunning
+        )
+    }
+
+    /// Get the error message if failed.
+    pub fn error_message(&self) -> Option<&str> {
+        match self {
+            DaemonConnectionState::Failed { error } => Some(error),
+            DaemonConnectionState::DaemonNotRunning => Some("Daemon is not running"),
+            _ => None,
+        }
+    }
+}
+
 /// Application state.
 #[derive(Debug)]
 pub struct App {
@@ -166,10 +216,16 @@ pub struct App {
     refresh_state: RefreshState,
     /// Current confirmation state (for delete dialog)
     confirmation_state: ConfirmationState,
-    /// Manager for multiple concurrent shares
+    /// Manager for multiple concurrent shares (legacy thread-based)
     share_manager: ShareManager,
+    /// Daemon-based share manager (new daemon-based sharing)
+    daemon_share_manager: DaemonShareManager,
+    /// Whether to use daemon-based sharing (enabled by default)
+    use_daemon_sharing: bool,
     /// The share ID currently being started (waiting for Started message)
     pending_share_id: Option<ShareId>,
+    /// The daemon share ID for pending daemon share
+    pending_daemon_share_path: Option<PathBuf>,
     /// The session path for the pending share
     pending_share_path: Option<PathBuf>,
     /// The provider name for the pending share
@@ -180,6 +236,12 @@ pub struct App {
     show_shares_panel: bool,
     /// State for the shares panel
     shares_panel_state: SharesPanelState,
+    /// Daemon connection state for reconnection
+    daemon_connection_state: DaemonConnectionState,
+    /// Receiver for initial daemon connection check
+    daemon_init_rx: Option<Receiver<DaemonMessage>>,
+    /// Whether we've shown the reconnected shares notification
+    reconnection_notified: bool,
 }
 
 impl Default for App {
@@ -207,12 +269,18 @@ impl App {
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
             share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            daemon_share_manager: DaemonShareManager::new(DEFAULT_MAX_SHARES),
+            use_daemon_sharing: true, // Enable daemon sharing by default
             pending_share_id: None,
+            pending_daemon_share_path: None,
             pending_share_path: None,
             pending_share_provider: None,
             share_modal_state: None,
             show_shares_panel: false,
             shares_panel_state: SharesPanelState::new(),
+            daemon_connection_state: DaemonConnectionState::NotConnected,
+            daemon_init_rx: None,
+            reconnection_notified: false,
         }
     }
 
@@ -234,12 +302,18 @@ impl App {
             refresh_state: RefreshState::default(),
             confirmation_state: ConfirmationState::default(),
             share_manager: ShareManager::new(DEFAULT_MAX_SHARES),
+            daemon_share_manager: DaemonShareManager::new(DEFAULT_MAX_SHARES),
+            use_daemon_sharing: true, // Enable daemon sharing by default
             pending_share_id: None,
+            pending_daemon_share_path: None,
             pending_share_path: None,
             pending_share_provider: None,
             share_modal_state: None,
             show_shares_panel: false,
             shares_panel_state: SharesPanelState::new(),
+            daemon_connection_state: DaemonConnectionState::NotConnected,
+            daemon_init_rx: None,
+            reconnection_notified: false,
         }
     }
 
@@ -329,6 +403,11 @@ impl App {
         // Check if status message should auto-clear
         if self.status_message_should_clear() {
             self.clear_status_message();
+        }
+
+        // Poll for daemon init completion
+        if self.daemon_connection_state.is_connecting() {
+            self.poll_daemon_init();
         }
     }
 
@@ -468,7 +547,7 @@ impl App {
             KeyCode::Char('d') => {
                 if let Some(session) = self.selected_session() {
                     // Cannot delete a session that is currently being shared
-                    if self.share_manager.is_session_shared(&session.path) {
+                    if self.is_session_shared_anywhere(&session.path) {
                         self.set_status_message("✗ Cannot delete: session is being shared");
                     } else {
                         self.confirmation_state = ConfirmationState::ConfirmingDelete {
@@ -481,6 +560,17 @@ impl App {
             // Help: ? to show keyboard shortcuts
             KeyCode::Char('?') => {
                 self.show_help = true;
+            }
+            // Reconnect daemon: R (shift+r) to retry daemon connection
+            KeyCode::Char('R') => {
+                if self.use_daemon_sharing && self.daemon_connection_state.is_failed() {
+                    self.set_status_message("Reconnecting to daemon...");
+                    self.retry_daemon_connection();
+                } else if self.use_daemon_sharing && self.daemon_connection_state.is_connected() {
+                    // Already connected, refresh share list
+                    self.set_status_message("Refreshing shares from daemon...");
+                    self.retry_daemon_connection();
+                }
             }
             // Escape: clear search if active, otherwise quit
             KeyCode::Esc => {
@@ -710,6 +800,7 @@ impl App {
     pub fn clear_sharing_state(&mut self) {
         self.sharing_state = SharingState::Inactive;
         self.pending_share_id = None;
+        self.pending_daemon_share_path = None;
         self.pending_share_path = None;
         self.pending_share_provider = None;
     }
@@ -724,14 +815,191 @@ impl App {
         &mut self.share_manager
     }
 
-    /// Check if we can start a new share (not at max capacity).
-    pub fn can_add_share(&self) -> bool {
-        self.share_manager.can_add_share()
+    /// Get a reference to the daemon share manager.
+    pub fn daemon_share_manager(&self) -> &DaemonShareManager {
+        &self.daemon_share_manager
     }
 
-    /// Get the number of active shares.
+    /// Get a mutable reference to the daemon share manager.
+    pub fn daemon_share_manager_mut(&mut self) -> &mut DaemonShareManager {
+        &mut self.daemon_share_manager
+    }
+
+    /// Check if daemon sharing is enabled.
+    pub fn is_daemon_sharing_enabled(&self) -> bool {
+        self.use_daemon_sharing
+    }
+
+    /// Enable or disable daemon sharing.
+    pub fn set_daemon_sharing_enabled(&mut self, enabled: bool) {
+        self.use_daemon_sharing = enabled;
+    }
+
+    /// Get the daemon connection state.
+    pub fn daemon_connection_state(&self) -> &DaemonConnectionState {
+        &self.daemon_connection_state
+    }
+
+    /// Initialize daemon connection and fetch existing shares.
+    ///
+    /// This should be called once after the app is created to check if the daemon
+    /// is running and fetch any existing shares that should be reconnected.
+    pub fn init_daemon_connection(&mut self) {
+        use crate::tui::daemon_bridge::fetch_shares_from_daemon;
+
+        if !self.use_daemon_sharing {
+            return;
+        }
+
+        // Only init if we haven't started yet
+        if !matches!(
+            self.daemon_connection_state,
+            DaemonConnectionState::NotConnected
+        ) {
+            return;
+        }
+
+        tracing::info!("Initializing daemon connection to fetch existing shares...");
+
+        // Create a channel for receiving daemon messages
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        // Store the receiver for polling
+        self.daemon_init_rx = Some(rx);
+        self.daemon_connection_state = DaemonConnectionState::Connecting;
+
+        // Kick off the fetch in a background thread
+        fetch_shares_from_daemon(tx);
+    }
+
+    /// Poll for daemon initialization completion.
+    ///
+    /// Called from tick() when connection state is Connecting.
+    fn poll_daemon_init(&mut self) {
+        let rx = match self.daemon_init_rx.as_ref() {
+            Some(rx) => rx,
+            None => return,
+        };
+
+        // Non-blocking check for messages
+        match rx.try_recv() {
+            Ok(msg) => {
+                self.handle_daemon_init_message(msg);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                // Still waiting, nothing to do
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                // Channel closed unexpectedly
+                tracing::warn!("Daemon init channel disconnected unexpectedly");
+                self.daemon_connection_state = DaemonConnectionState::Failed {
+                    error: "Connection check failed".to_string(),
+                };
+                self.daemon_init_rx = None;
+            }
+        }
+    }
+
+    /// Handle a message from the daemon init process.
+    fn handle_daemon_init_message(&mut self, msg: DaemonMessage) {
+        match msg {
+            DaemonMessage::ShareListReceived { shares } => {
+                let active_count = shares
+                    .iter()
+                    .filter(|s| {
+                        matches!(
+                            s.status,
+                            crate::daemon::protocol::ShareStatus::Active
+                                | crate::daemon::protocol::ShareStatus::Starting
+                        )
+                    })
+                    .count();
+
+                tracing::info!(
+                    "Fetched {} shares from daemon ({} active)",
+                    shares.len(),
+                    active_count
+                );
+
+                // Update daemon share manager with existing shares
+                self.daemon_share_manager.update_from_daemon(shares);
+                self.daemon_connection_state = DaemonConnectionState::Connected;
+                self.daemon_init_rx = None;
+
+                // Show status message if we reconnected to existing shares
+                if active_count > 0 && !self.reconnection_notified {
+                    self.reconnection_notified = true;
+                    let share_word = if active_count == 1 { "share" } else { "shares" };
+                    self.set_status_message(format!(
+                        "✓ Reconnected to {} active {}",
+                        active_count, share_word
+                    ));
+                }
+            }
+            DaemonMessage::Connected => {
+                // This just means we connected, still waiting for shares list
+                tracing::debug!("Daemon connection established, waiting for share list");
+            }
+            DaemonMessage::ConnectionFailed { error } => {
+                tracing::debug!(error = %error, "Daemon connection failed (expected if daemon not running)");
+                self.daemon_connection_state = DaemonConnectionState::DaemonNotRunning;
+                self.daemon_init_rx = None;
+                // Don't show error message - daemon not running is normal
+            }
+            DaemonMessage::Error { message } => {
+                tracing::warn!(error = %message, "Error fetching shares from daemon");
+                self.daemon_connection_state = DaemonConnectionState::Failed { error: message };
+                self.daemon_init_rx = None;
+            }
+            _ => {
+                // Unexpected message type during init
+                tracing::warn!(?msg, "Unexpected message during daemon init");
+            }
+        }
+    }
+
+    /// Retry daemon connection after a failure.
+    ///
+    /// This can be called to attempt reconnection after the daemon was started
+    /// or after recovering from an error.
+    pub fn retry_daemon_connection(&mut self) {
+        // Reset state to allow re-init
+        self.daemon_connection_state = DaemonConnectionState::NotConnected;
+        self.daemon_init_rx = None;
+        self.reconnection_notified = false;
+
+        // Trigger new connection attempt
+        self.init_daemon_connection();
+    }
+
+    /// Check if we can start a new share (not at max capacity).
+    /// Checks both legacy and daemon share managers.
+    pub fn can_add_share(&self) -> bool {
+        if self.use_daemon_sharing {
+            self.daemon_share_manager.can_add_share()
+        } else {
+            self.share_manager.can_add_share()
+        }
+    }
+
+    /// Get the number of active shares (from both managers).
     pub fn active_share_count(&self) -> usize {
-        self.share_manager.active_count()
+        if self.use_daemon_sharing {
+            self.daemon_share_manager.active_count()
+        } else {
+            self.share_manager.active_count()
+        }
+    }
+
+    /// Check if there are any active shares (from either manager).
+    pub fn has_any_active_shares(&self) -> bool {
+        self.share_manager.has_active_shares() || self.daemon_share_manager.has_active_shares()
+    }
+
+    /// Check if a session is shared (via either manager).
+    pub fn is_session_shared_anywhere(&self, path: &std::path::Path) -> bool {
+        self.share_manager.is_session_shared(path)
+            || self.daemon_share_manager.is_session_shared(path)
     }
 
     /// Set the pending share info (when starting a new share).
@@ -748,7 +1016,7 @@ impl App {
 
     /// Check if there's a pending share waiting for a Started message.
     pub fn has_pending_share(&self) -> bool {
-        self.pending_share_id.is_some()
+        self.pending_share_id.is_some() || self.pending_daemon_share_path.is_some()
     }
 
     /// Clear the pending share info and return the values.
@@ -770,9 +1038,13 @@ impl App {
 
     /// Stop all active shares.
     pub fn stop_all_shares(&mut self) {
+        // Stop legacy shares
         self.share_manager.stop_all();
+        // Clear daemon share manager (shares in daemon are not stopped - they persist)
+        self.daemon_share_manager.clear();
         self.sharing_state = SharingState::Inactive;
         self.pending_share_id = None;
+        self.pending_daemon_share_path = None;
         self.pending_share_path = None;
         self.pending_share_provider = None;
     }
@@ -822,6 +1094,7 @@ impl App {
     /// share state transitions without leaving the alternate screen,
     /// which prevents screen flickering.
     pub fn process_share_messages(&mut self) {
+        // Process legacy share manager messages
         let messages = self.share_manager.poll_messages();
         let mut shares_to_remove: Vec<ShareId> = Vec::new();
 
@@ -871,6 +1144,109 @@ impl App {
                 self.clear_sharing_state();
             }
         }
+
+        // Process daemon share manager messages
+        if self.use_daemon_sharing {
+            self.process_daemon_share_messages();
+        }
+    }
+
+    /// Process pending share messages from daemon bridge.
+    fn process_daemon_share_messages(&mut self) {
+        let messages = self.daemon_share_manager.poll_messages();
+
+        for msg in messages {
+            match msg {
+                DaemonMessage::ShareStarted { info } => {
+                    // Copy URL to clipboard
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&info.public_url);
+                    }
+                    // Handle pending share state transitions
+                    if let Some(pending_path) = self.pending_daemon_share_path.take() {
+                        if pending_path == info.session_path {
+                            let session_name = info.session_name.clone();
+                            let url = info.public_url.clone();
+                            let provider = info.provider_name.clone();
+                            self.set_sharing_active(url.clone(), provider.clone());
+                            self.show_share_modal(session_name, url, provider);
+                        }
+                    }
+                    // Clear legacy pending share state too
+                    self.pending_share_id = None;
+                    self.pending_share_path = None;
+                    self.pending_share_provider = None;
+                }
+                DaemonMessage::ShareFailed { error } => {
+                    tracing::error!(error = %error, "Daemon share failed");
+                    self.set_status_message(format!("Share failed: {}", error));
+                    self.pending_daemon_share_path = None;
+                    self.clear_sharing_state();
+                }
+                DaemonMessage::ShareStopped { share_id } => {
+                    self.daemon_share_manager.mark_stopped(share_id);
+                    if !self.daemon_share_manager.has_active_shares() {
+                        self.clear_sharing_state();
+                    }
+                }
+                DaemonMessage::ShareListReceived { shares } => {
+                    // Update daemon share manager with latest shares from daemon
+                    self.daemon_share_manager.update_from_daemon(shares);
+                }
+                DaemonMessage::Connected => {
+                    tracing::info!("Connected to daemon");
+                    // Update connection state if we were in a failed state
+                    if self.daemon_connection_state.is_failed() {
+                        self.daemon_connection_state = DaemonConnectionState::Connected;
+                        self.set_status_message("✓ Daemon reconnected");
+                    }
+                }
+                DaemonMessage::ConnectionFailed { error } => {
+                    tracing::warn!(error = %error, "Failed to connect to daemon");
+                    // Update connection state to show failure
+                    self.daemon_connection_state = DaemonConnectionState::Failed {
+                        error: error.clone(),
+                    };
+                    // Show error to user with hint to retry
+                    self.set_status_message(format!(
+                        "Daemon connection failed: {}. Press 'R' to retry.",
+                        error
+                    ));
+                }
+                DaemonMessage::Error { message } => {
+                    tracing::error!(error = %message, "Daemon error");
+                    // Check if this looks like a connection error (daemon crash)
+                    if message.contains("connection")
+                        || message.contains("Connection")
+                        || message.contains("closed")
+                        || message.contains("refused")
+                    {
+                        self.daemon_connection_state = DaemonConnectionState::Failed {
+                            error: message.clone(),
+                        };
+                        self.set_status_message(format!(
+                            "Daemon error: {}. Press 'R' to reconnect.",
+                            message
+                        ));
+                    } else {
+                        self.set_status_message(format!("Daemon error: {}", message));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Set the pending daemon share path (when starting a daemon share).
+    pub fn set_pending_daemon_share(&mut self, path: PathBuf, provider: String) {
+        self.pending_daemon_share_path = Some(path.clone());
+        // Also set legacy fields for UI state
+        self.pending_share_path = Some(path);
+        self.pending_share_provider = Some(provider);
+    }
+
+    /// Check if there's a pending daemon share.
+    pub fn has_pending_daemon_share(&self) -> bool {
+        self.pending_daemon_share_path.is_some()
     }
 
     /// Set a status message to display in the footer.
@@ -937,21 +1313,39 @@ impl App {
         match key_event.code {
             // Navigation
             KeyCode::Char('j') | KeyCode::Down => {
-                self.shares_panel_state.select_next();
+                if self.use_daemon_sharing {
+                    self.daemon_share_manager.select_next();
+                } else {
+                    self.shares_panel_state.select_next();
+                }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.shares_panel_state.select_previous();
+                if self.use_daemon_sharing {
+                    self.daemon_share_manager.select_previous();
+                } else {
+                    self.shares_panel_state.select_previous();
+                }
             }
             // Enter: copy selected share's URL
             KeyCode::Enter => {
-                if let Some(share) = self.selected_active_share() {
+                if self.use_daemon_sharing {
+                    if let Some(share) = self.selected_daemon_share() {
+                        self.pending_action = Action::CopyShareUrl(share.public_url.clone());
+                        self.set_status_message("✓ URL copied to clipboard");
+                    }
+                } else if let Some(share) = self.selected_active_share() {
                     self.pending_action = Action::CopyShareUrl(share.public_url.clone());
                     self.set_status_message("✓ URL copied to clipboard");
                 }
             }
             // d: stop selected share
             KeyCode::Char('d') => {
-                if let Some(share) = self.selected_active_share() {
+                if self.use_daemon_sharing {
+                    if let Some(share) = self.selected_daemon_share() {
+                        let id = share.daemon_id;
+                        self.pending_action = Action::StopDaemonShare(id);
+                    }
+                } else if let Some(share) = self.selected_active_share() {
                     let id = share.id;
                     self.pending_action = Action::StopShareById(id);
                 }
@@ -978,14 +1372,23 @@ impl App {
     pub fn toggle_shares_panel(&mut self) {
         self.show_shares_panel = !self.show_shares_panel;
         if self.show_shares_panel {
-            let shares = self.share_manager.shares();
+            // Get shares from appropriate manager
+            let share_count = if self.use_daemon_sharing {
+                self.daemon_share_manager.active_count()
+            } else {
+                self.share_manager.shares().len()
+            };
             tracing::info!(
-                share_count = shares.len(),
+                share_count = share_count,
+                use_daemon = self.use_daemon_sharing,
                 "toggle_shares_panel: Opening with {} shares",
-                shares.len()
+                share_count
             );
             // Update the shares panel state with current shares
-            self.shares_panel_state.update(shares);
+            // Note: For daemon shares, we update via get_all_shares_as_active()
+            if !self.use_daemon_sharing {
+                self.shares_panel_state.update(self.share_manager.shares());
+            }
         }
     }
 
@@ -995,10 +1398,43 @@ impl App {
     }
 
     /// Get the currently selected active share (for shares panel).
+    /// Returns the legacy ActiveShare for backwards compatibility with the widget.
     pub fn selected_active_share(&self) -> Option<&crate::tui::sharing::ActiveShare> {
-        let shares = self.share_manager.shares();
-        let idx = self.shares_panel_state.selected();
-        shares.get(idx)
+        if self.use_daemon_sharing {
+            // For daemon shares, we can't return a reference since we need to create
+            // ActiveShare on the fly. Return None and use selected_daemon_share() instead.
+            None
+        } else {
+            let shares = self.share_manager.shares();
+            let idx = self.shares_panel_state.selected();
+            shares.get(idx)
+        }
+    }
+
+    /// Get the currently selected daemon share.
+    pub fn selected_daemon_share(&self) -> Option<&crate::tui::daemon_bridge::DaemonActiveShare> {
+        self.daemon_share_manager.selected_share()
+    }
+
+    /// Get all shares as legacy ActiveShare format (for backwards compatibility).
+    /// This creates new ActiveShare objects from daemon shares.
+    pub fn get_all_shares_as_active(&self) -> Vec<crate::tui::sharing::ActiveShare> {
+        if self.use_daemon_sharing {
+            self.daemon_share_manager
+                .active_shares()
+                .iter()
+                .map(|ds| {
+                    crate::tui::sharing::ActiveShare::new(
+                        ShareId::new(), // Generate a temporary ID for display
+                        ds.session_path.clone(),
+                        ds.public_url.clone(),
+                        ds.provider_name.clone(),
+                    )
+                })
+                .collect()
+        } else {
+            self.share_manager.shares().to_vec()
+        }
     }
 
     /// Remove a session from the list by its file path.
@@ -1066,11 +1502,22 @@ impl App {
 
     /// Render the shares panel.
     fn render_shares_panel(&mut self, frame: &mut Frame, area: Rect) {
-        // Always sync shares state before rendering to ensure panel is up-to-date
-        self.shares_panel_state.update(self.share_manager.shares());
-        let shares = self.share_manager.shares();
-        let widget = SharesPanel::new(shares);
-        frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
+        if self.use_daemon_sharing {
+            // For daemon shares, convert to ActiveShare format for the widget
+            let shares = self.get_all_shares_as_active();
+            // Sync selection from daemon manager before rendering
+            let selected = self.daemon_share_manager.selected_index();
+            self.shares_panel_state.update(&shares);
+            self.shares_panel_state.set_selected(selected);
+            let widget = SharesPanel::new(&shares);
+            frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
+        } else {
+            // Legacy mode: use share_manager directly
+            self.shares_panel_state.update(self.share_manager.shares());
+            let shares = self.share_manager.shares();
+            let widget = SharesPanel::new(shares);
+            frame.render_stateful_widget(widget, area, &mut self.shares_panel_state);
+        }
     }
 
     /// Render the share started modal.
@@ -3166,6 +3613,8 @@ mod tests {
     #[test]
     fn test_app_share_manager_mut_allows_modification() {
         let mut app = App::new();
+        // Disable daemon sharing for this test to use legacy share manager
+        app.set_daemon_sharing_enabled(false);
 
         // Mark a share as started
         let id = ShareId::new();
@@ -3196,6 +3645,8 @@ mod tests {
     #[test]
     fn test_app_can_add_share_respects_max() {
         let mut app = App::new();
+        // Disable daemon sharing for this test to use legacy share manager
+        app.set_daemon_sharing_enabled(false);
         app.set_max_shares(2);
 
         // Initially can add
@@ -3507,5 +3958,199 @@ mod tests {
         // j/k should also be intercepted
         app.handle_key_event(key_event(KeyCode::Char('j'))).unwrap();
         assert_eq!(app.session_list_state.selected(), initial_selected);
+    }
+
+    // Tests for DaemonConnectionState
+
+    #[test]
+    fn test_daemon_connection_state_default() {
+        let state = DaemonConnectionState::default();
+        assert!(matches!(state, DaemonConnectionState::NotConnected));
+    }
+
+    #[test]
+    fn test_daemon_connection_state_is_connecting() {
+        assert!(!DaemonConnectionState::NotConnected.is_connecting());
+        assert!(DaemonConnectionState::Connecting.is_connecting());
+        assert!(!DaemonConnectionState::Connected.is_connecting());
+        assert!(!DaemonConnectionState::DaemonNotRunning.is_connecting());
+        assert!(!DaemonConnectionState::Failed {
+            error: "test".to_string()
+        }
+        .is_connecting());
+    }
+
+    #[test]
+    fn test_daemon_connection_state_is_connected() {
+        assert!(!DaemonConnectionState::NotConnected.is_connected());
+        assert!(!DaemonConnectionState::Connecting.is_connected());
+        assert!(DaemonConnectionState::Connected.is_connected());
+        assert!(!DaemonConnectionState::DaemonNotRunning.is_connected());
+        assert!(!DaemonConnectionState::Failed {
+            error: "test".to_string()
+        }
+        .is_connected());
+    }
+
+    #[test]
+    fn test_daemon_connection_state_is_failed() {
+        assert!(!DaemonConnectionState::NotConnected.is_failed());
+        assert!(!DaemonConnectionState::Connecting.is_failed());
+        assert!(!DaemonConnectionState::Connected.is_failed());
+        assert!(DaemonConnectionState::DaemonNotRunning.is_failed());
+        assert!(DaemonConnectionState::Failed {
+            error: "test".to_string()
+        }
+        .is_failed());
+    }
+
+    #[test]
+    fn test_daemon_connection_state_error_message() {
+        assert!(DaemonConnectionState::NotConnected
+            .error_message()
+            .is_none());
+        assert!(DaemonConnectionState::Connecting.error_message().is_none());
+        assert!(DaemonConnectionState::Connected.error_message().is_none());
+        assert_eq!(
+            DaemonConnectionState::DaemonNotRunning.error_message(),
+            Some("Daemon is not running")
+        );
+        assert_eq!(
+            DaemonConnectionState::Failed {
+                error: "Custom error".to_string()
+            }
+            .error_message(),
+            Some("Custom error")
+        );
+    }
+
+    // Tests for daemon connection in App
+
+    #[test]
+    fn test_app_daemon_connection_state_default() {
+        let app = App::new();
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::NotConnected
+        ));
+    }
+
+    #[test]
+    fn test_app_daemon_sharing_enabled_by_default() {
+        let app = App::new();
+        assert!(app.is_daemon_sharing_enabled());
+    }
+
+    #[test]
+    fn test_app_init_daemon_connection_when_disabled() {
+        let mut app = App::new();
+        app.set_daemon_sharing_enabled(false);
+
+        // This should do nothing when daemon sharing is disabled
+        app.init_daemon_connection();
+
+        // State should remain NotConnected
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::NotConnected
+        ));
+    }
+
+    #[test]
+    fn test_app_init_daemon_connection_sets_connecting() {
+        let mut app = App::new();
+
+        // This will set state to Connecting (actual connection happens async)
+        app.init_daemon_connection();
+
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::Connecting
+        ));
+    }
+
+    #[test]
+    fn test_app_retry_daemon_connection_resets_state() {
+        let mut app = App::new();
+
+        // Simulate failed state
+        app.daemon_connection_state = DaemonConnectionState::Failed {
+            error: "test error".to_string(),
+        };
+
+        // Retry should reset and reconnect
+        app.retry_daemon_connection();
+
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::Connecting
+        ));
+    }
+
+    #[test]
+    fn test_handle_key_shift_r_does_nothing_when_not_failed() {
+        let mut app = App::new();
+        // State is NotConnected (not failed)
+
+        app.handle_key_event(key_event(KeyCode::Char('R'))).unwrap();
+
+        // Should still be NotConnected (R only works when connected or failed)
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::NotConnected
+        ));
+    }
+
+    #[test]
+    fn test_handle_key_shift_r_retries_when_failed() {
+        let mut app = App::new();
+
+        // Simulate failed state
+        app.daemon_connection_state = DaemonConnectionState::Failed {
+            error: "test error".to_string(),
+        };
+
+        app.handle_key_event(key_event(KeyCode::Char('R'))).unwrap();
+
+        // Should now be Connecting (retry started)
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::Connecting
+        ));
+    }
+
+    #[test]
+    fn test_handle_key_shift_r_refreshes_when_connected() {
+        let mut app = App::new();
+
+        // Simulate connected state
+        app.daemon_connection_state = DaemonConnectionState::Connected;
+
+        app.handle_key_event(key_event(KeyCode::Char('R'))).unwrap();
+
+        // Should now be Connecting (refresh started)
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::Connecting
+        ));
+    }
+
+    #[test]
+    fn test_handle_key_shift_r_does_nothing_when_daemon_disabled() {
+        let mut app = App::new();
+        app.set_daemon_sharing_enabled(false);
+
+        // Simulate failed state
+        app.daemon_connection_state = DaemonConnectionState::Failed {
+            error: "test error".to_string(),
+        };
+
+        app.handle_key_event(key_event(KeyCode::Char('R'))).unwrap();
+
+        // Should still be Failed (R does nothing when daemon sharing disabled)
+        assert!(matches!(
+            app.daemon_connection_state(),
+            DaemonConnectionState::Failed { .. }
+        ));
     }
 }

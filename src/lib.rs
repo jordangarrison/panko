@@ -1,4 +1,5 @@
 pub mod config;
+pub mod daemon;
 pub mod export;
 pub mod logging;
 pub mod parser;

@@ -45,6 +45,7 @@ pub fn get_shortcut_categories() -> Vec<ShortcutCategory> {
                 ("v / Enter", "View session"),
                 ("s", "Share session"),
                 ("S", "Show active shares"),
+                ("R", "Reconnect daemon"),
                 ("c", "Copy session path"),
                 ("C", "Copy context to clipboard"),
                 ("D", "Download to ~/Downloads"),

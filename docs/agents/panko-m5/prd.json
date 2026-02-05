@@ -8,7 +8,7 @@
       "title": "Create daemon module structure",
       "description": "Set up the src/daemon/ module with protocol types for IPC communication",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/mod.rs with module exports",
         "Create src/daemon/protocol.rs with ShareId (UUID), DaemonRequest, DaemonResponse enums",
@@ -23,7 +23,7 @@
       "title": "Implement SQLite persistence layer",
       "description": "Create database module for share state persistence",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/db.rs with Database struct",
         "Implement create_tables() for schema initialization",
@@ -39,7 +39,7 @@
       "title": "Implement daemon server",
       "description": "Create the main daemon process that handles IPC and manages shares",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/server.rs with DaemonServer struct",
         "Bind Unix socket at ~/.local/share/panko/daemon.sock",
@@ -55,7 +55,7 @@
       "title": "Implement share service",
       "description": "Port sharing logic from TUI threads to daemon service",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/share_service.rs with ShareService struct",
         "start_share() spawns server + tunnel, returns ShareInfo",
@@ -70,7 +70,7 @@
       "title": "Add serve command to CLI",
       "description": "Add panko serve subcommand to run the daemon",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Add Serve subcommand with --foreground flag",
         "Add ServeStop subcommand",
@@ -87,7 +87,7 @@
       "title": "Implement daemon client",
       "description": "Create client library for TUI to communicate with daemon",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "Create src/daemon/client.rs with DaemonClient struct",
         "connect() connects to existing daemon socket",
@@ -102,7 +102,7 @@
       "title": "Integrate daemon client into TUI",
       "description": "Replace thread-based sharing with daemon IPC",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "TUI auto-starts daemon on launch if not running",
         "Action::StartSharing uses DaemonClient instead of SharingHandle",
@@ -118,7 +118,7 @@
       "title": "Handle reconnection and recovery",
       "description": "TUI reconnects to existing shares on restart",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptance_criteria": [
         "On TUI start, fetch existing shares from daemon",
         "Display reconnected shares in shares panel",

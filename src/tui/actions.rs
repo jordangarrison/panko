@@ -45,8 +45,10 @@ pub enum Action {
     DownloadSession(PathBuf),
     /// Copy a URL to clipboard (used by share modal).
     CopyShareUrl(String),
-    /// Stop a specific share by its ID.
+    /// Stop a specific share by its ID (legacy thread-based).
     StopShareById(crate::tui::sharing::ShareId),
+    /// Stop a daemon share by its UUID.
+    StopDaemonShare(crate::daemon::protocol::ShareId),
     /// No action to perform.
     #[default]
     None,
@@ -197,6 +199,17 @@ mod tests {
         match action {
             Action::StopShareById(i) => assert_eq!(i, id),
             _ => panic!("Expected StopShareById"),
+        }
+    }
+
+    #[test]
+    fn test_action_stop_daemon_share() {
+        use crate::daemon::protocol::ShareId as DaemonShareId;
+        let id = DaemonShareId::new();
+        let action = Action::StopDaemonShare(id);
+        match action {
+            Action::StopDaemonShare(i) => assert_eq!(i, id),
+            _ => panic!("Expected StopDaemonShare"),
         }
     }
 }
