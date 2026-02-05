@@ -68,3 +68,29 @@ Write integration tests in `tests/` directory for complex behaviors.
 - No "Generated with Claude Code" in messages
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
 - One commit per completed story when reasonable
+
+## Nix Package
+
+The flake exports a package built with crane (two-phase: deps cache + binary).
+
+### Key files
+- `flake.nix` — inputs (nixpkgs, flake-parts, rust-overlay, crane)
+- `nix/devshell.nix` — development shell (rust toolchain, dev tools)
+- `nix/package.nix` — package, overlay, and app outputs
+
+### Build commands
+```bash
+nix build .#panko           # Build wrapped binary (with cloudflared, clipboard)
+nix build .#panko-unwrapped # Build without runtime wrapping
+nix run . -- --help         # Run directly
+nix flake show              # Verify all outputs
+```
+
+### Runtime wrapping
+The package wraps the binary with optional runtime tools via makeWrapper:
+- `withCloudflared` (default: true)
+- `withNgrok` (default: false)
+- `withTailscale` (default: false)
+- `withClipboard` (default: true, Linux only — wl-copy + xclip)
+
+Override via `lib.makeOverridable` pattern.

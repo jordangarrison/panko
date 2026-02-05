@@ -18,6 +18,41 @@ cd panko
 cargo install --path .
 ```
 
+### With Nix
+
+```bash
+# Run directly without installing
+nix run github:jordangarrison/panko
+
+# Run with arguments
+nix run github:jordangarrison/panko -- tui
+nix run github:jordangarrison/panko -- view session.jsonl
+```
+
+#### NixOS / Home Manager
+
+Add panko as a flake input and use the overlay:
+
+```nix
+# flake.nix
+inputs.panko.url = "github:jordangarrison/panko";
+
+# configuration.nix
+nixpkgs.overlays = [ panko.overlays.default ];
+environment.systemPackages = [ pkgs.panko ];
+```
+
+Tunnel providers (cloudflared) and clipboard tools are included by default. Customize with override:
+
+```nix
+(pkgs.panko.override {
+  withCloudflared = true;   # default: true
+  withNgrok = false;        # default: false
+  withTailscale = false;    # default: false
+  withClipboard = true;     # default: true (Linux only)
+})
+```
+
 ## Usage
 
 ### View a session locally
