@@ -2,14 +2,7 @@
 {
   flake = {
     overlays.default = final: prev: {
-      panko = final.callPackage (
-        { lib, stdenv, cloudflared, ngrok, tailscale, wl-clipboard, xclip, makeWrapper }:
-        let
-          system = final.stdenv.hostPlatform.system;
-          pankoPackages = inputs.self.packages.${system};
-        in
-        pankoPackages.default
-      ) {};
+      panko = inputs.self.packages.${final.stdenv.hostPlatform.system}.default;
     };
   };
 
@@ -32,6 +25,13 @@
         inherit src;
         strictDeps = true;
         pname = "panko";
+
+        meta = with lib; {
+          description = "CLI tool for viewing and sharing AI coding agent sessions";
+          homepage = "https://github.com/jordangarrison/panko";
+          license = licenses.mit;
+          mainProgram = "panko";
+        };
 
         nativeBuildInputs = with pkgs; [
           pkg-config
