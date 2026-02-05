@@ -357,12 +357,100 @@ Only commit if changes were needed. If everything passed, no commit needed.
 
 ---
 
-### Task 7: Final commit and PR prep
+### Task 7: Update documentation
+
+**Files:**
+- Modify: `README.md`
+- Modify: `CLAUDE.md`
+
+**Step 1: Add Nix installation section to README.md**
+
+Add a `### With Nix` section under `## Installation`, after the "From source" section:
+
+```markdown
+### With Nix
+
+```bash
+# Run directly without installing
+nix run github:jordangarrison/panko
+
+# Run with arguments
+nix run github:jordangarrison/panko -- tui
+nix run github:jordangarrison/panko -- view session.jsonl
+```
+
+#### NixOS / Home Manager
+
+Add panko as a flake input and use the overlay:
+
+```nix
+# flake.nix
+inputs.panko.url = "github:jordangarrison/panko";
+
+# configuration.nix
+nixpkgs.overlays = [ panko.overlays.default ];
+environment.systemPackages = [ pkgs.panko ];
+```
+
+Tunnel providers (cloudflared) and clipboard tools are included by default. Customize with override:
+
+```nix
+(pkgs.panko.override {
+  withCloudflared = true;   # default: true
+  withNgrok = false;        # default: false
+  withTailscale = false;    # default: false
+  withClipboard = true;     # default: true (Linux only)
+})
+```
+```
+
+**Step 2: Add Nix package notes to CLAUDE.md**
+
+Add a `## Nix Package` section after the `## Commit Guidelines` section in `CLAUDE.md`:
+
+```markdown
+## Nix Package
+
+The flake exports a package built with crane (two-phase: deps cache + binary).
+
+### Key files
+- `flake.nix` — inputs (nixpkgs, flake-parts, rust-overlay, crane)
+- `nix/devshell.nix` — development shell (rust toolchain, dev tools)
+- `nix/package.nix` — package, overlay, and app outputs
+
+### Build commands
+```bash
+nix build .#panko           # Build wrapped binary (with cloudflared, clipboard)
+nix build .#panko-unwrapped # Build without runtime wrapping
+nix run . -- --help         # Run directly
+nix flake show              # Verify all outputs
+```
+
+### Runtime wrapping
+The package wraps the binary with optional runtime tools via makeWrapper:
+- `withCloudflared` (default: true)
+- `withNgrok` (default: false)
+- `withTailscale` (default: false)
+- `withClipboard` (default: true, Linux only — wl-copy + xclip)
+
+Override via `lib.makeOverridable` pattern.
+```
+
+**Step 3: Commit**
+
+```bash
+git add README.md CLAUDE.md
+git commit -m "docs: add nix package installation and development notes"
+```
+
+---
+
+### Task 8: Final commit and PR prep
 
 **Step 1: Verify all changes**
 
 Run: `git log --oneline main..HEAD`
-Expected: Shows commits from tasks 1-6.
+Expected: Shows commits from tasks 1-7.
 
 **Step 2: Verify clean state**
 
