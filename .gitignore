@@ -5,7 +5,7 @@ result-*
 
 # Rust (for when Cargo.toml exists)
 /target/
-Cargo.lock
+# Cargo.lock is committed for binary crates (required for nix build)
 
 # Environment files (prevent accidental secret commits)
 .env
