@@ -8,6 +8,7 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs = inputs@{ flake-parts, ... }:
@@ -16,6 +17,7 @@
 
       imports = [
         ./nix/devshell.nix
+        ./nix/package.nix
       ];
     };
 }
