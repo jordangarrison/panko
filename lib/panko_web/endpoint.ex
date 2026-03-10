@@ -27,16 +27,16 @@ defmodule PankoWeb.Endpoint do
     only: PankoWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
+  if Code.ensure_loaded?(Tidewave) do
+    plug Tidewave
+  end
+
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
   if code_reloading? do
     socket "/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket
     plug Phoenix.LiveReloader
     plug Phoenix.CodeReloader
-
-    if Code.ensure_loaded?(Tidewave) do
-      plug Tidewave
-    end
   end
 
   plug Plug.RequestId
