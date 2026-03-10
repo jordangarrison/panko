@@ -14,8 +14,12 @@ defmodule PankoWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :maybe_require_api_key do
+    plug PankoWeb.Plugs.ApiKeyAuth
+  end
+
   scope "/", PankoWeb do
-    pipe_through :browser
+    pipe_through [:browser, :maybe_require_api_key]
 
     live_session :default, layout: {PankoWeb.Layouts, :app} do
       live "/", SessionsLive, :index
