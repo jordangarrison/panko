@@ -79,5 +79,20 @@ defmodule Panko.Sessions.SubAgent do
         :session_id
       ]
     end
+
+    update :update do
+      primary? true
+
+      accept [
+        :external_id,
+        :agent_type,
+        :description,
+        :prompt,
+        :status,
+        :result,
+        :spawned_at,
+        :completed_at
+      ]
+    end
   end
 end

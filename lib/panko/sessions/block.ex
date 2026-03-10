@@ -61,5 +61,10 @@ defmodule Panko.Sessions.Block do
       primary? true
       accept [:position, :block_type, :content, :metadata, :timestamp, :session_id]
     end
+
+    update :update do
+      primary? true
+      accept [:position, :block_type, :content, :metadata, :timestamp]
+    end
   end
 end

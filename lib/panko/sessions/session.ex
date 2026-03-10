@@ -107,6 +107,44 @@ defmodule Panko.Sessions.Session do
       ]
     end
 
+    create :upsert_from_import do
+      accept [
+        :external_id,
+        :source_type,
+        :source_path,
+        :project,
+        :title,
+        :started_at
+      ]
+
+      upsert? true
+      upsert_identity :external_id_source_type
+      upsert_fields [:source_path, :project, :title, :started_at]
+
+      argument :blocks, {:array, :map}, allow_nil?: false
+      argument :sub_agents, {:array, :map}, default: []
+
+      change manage_relationship(:blocks, :blocks, type: :direct_control)
+      change manage_relationship(:sub_agents, :sub_agents, type: :direct_control)
+    end
+
+    action :import_from_file, :struct do
+      constraints instance_of: __MODULE__
+
+      argument :file_path, :string, allow_nil?: false
+
+      run fn input, _context ->
+        path = input.arguments.file_path
+
+        with {:ok, parser} <- Panko.Sessions.Parsers.Registry.find_parser(path),
+             {:ok, attrs} <- parser.parse(path) do
+          __MODULE__
+          |> Ash.Changeset.for_create(:upsert_from_import, attrs)
+          |> Ash.create()
+        end
+      end
+    end
+
     read :list_recent do
       prepare build(sort: [started_at: :desc], limit: 50)
     end
