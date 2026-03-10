@@ -19,7 +19,13 @@ config :panko, ecto_repos: [Panko.Repo]
 # Oban
 config :panko, Oban,
   repo: Panko.Repo,
-  queues: [default: 10, shares: 5]
+  queues: [default: 10, shares: 5],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 * * * *", Panko.Sharing.Workers.ShareReaper}
+     ]}
+  ]
 
 # Configure the endpoint
 config :panko, PankoWeb.Endpoint,
