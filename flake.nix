@@ -1,14 +1,9 @@
 {
-  description = "panko - CLI tool for viewing and sharing AI coding agent sessions";
+  description = "panko - web app for viewing and sharing AI coding agent sessions";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    crane.url = "github:ipetkov/crane";
   };
 
   outputs = inputs@{ flake-parts, ... }:
@@ -17,7 +12,6 @@
 
       imports = [
         ./nix/devshell.nix
-        ./nix/package.nix
       ];
     };
 }
