@@ -1,6 +1,8 @@
 defmodule PankoWeb.SessionsLive do
   use PankoWeb, :live_view
 
+  require Ash.Query
+
   alias Panko.Sessions.Session
 
   @impl true
@@ -10,7 +12,8 @@ defmodule PankoWeb.SessionsLive do
     end
 
     sessions = load_sessions()
-    {:ok, assign(socket, sessions: sessions, page_title: "Sessions")}
+    shared_session_ids = load_shared_session_ids()
+    {:ok, assign(socket, sessions: sessions, shared_session_ids: shared_session_ids, page_title: "Sessions")}
   end
 
   @impl true
@@ -37,9 +40,18 @@ defmodule PankoWeb.SessionsLive do
           class="card bg-base-200 shadow-sm hover:shadow-md transition-shadow"
         >
           <div class="card-body">
-            <h2 class="card-title text-sm font-mono">
-              {session.title || "Untitled session"}
-            </h2>
+            <div class="flex items-center justify-between">
+              <h2 class="card-title text-sm font-mono">
+                {session.title || "Untitled session"}
+              </h2>
+              <span
+                :if={MapSet.member?(@shared_session_ids, session.id)}
+                class="badge badge-success badge-sm gap-1"
+                title="Shared"
+              >
+                <.icon name="hero-link-micro" class="size-3" /> Shared
+              </span>
+            </div>
             <p class="text-xs text-base-content/60">{session.project}</p>
             <div class="flex gap-4 text-xs text-base-content/50 mt-2">
               <span>{session.message_count || 0} messages</span>
@@ -59,6 +71,15 @@ defmodule PankoWeb.SessionsLive do
     |> Ash.Query.limit(50)
     |> Ash.Query.load([:block_count, :message_count, :tool_call_count])
     |> Ash.read!()
+  end
+
+  defp load_shared_session_ids do
+    Panko.Sharing.Share
+    |> Ash.Query.filter(is_shared == true)
+    |> Ash.Query.select([:session_id])
+    |> Ash.read!()
+    |> Enum.map(& &1.session_id)
+    |> MapSet.new()
   end
 
   defp format_time(nil), do: ""

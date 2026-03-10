@@ -40,6 +40,20 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 
+// Handle modal:open and modal:close events for daisyUI dialog elements
+window.addEventListener("modal:open", (e) => {
+  e.target.showModal()
+})
+window.addEventListener("modal:close", (e) => {
+  e.target.close()
+})
+
+// Handle phx:copy events for copying input values to clipboard
+window.addEventListener("phx:copy", (e) => {
+  const text = e.target.value || e.target.textContent
+  navigator.clipboard.writeText(text)
+})
+
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
