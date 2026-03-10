@@ -1,0 +1,51 @@
+# Build artifacts
+_build/
+deps/
+doc/
+
+# Version control
+.git
+.gitignore
+
+# Development
+.env
+.direnv/
+tmp/
+
+# Nix
+/result
+flake.nix
+flake.lock
+nix/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Grove
+.grove/
+
+# Database
+*.db
+*.db-journal
+.pgdata/
+
+# Node
+node_modules/
+npm-debug.log
+
+# Static output (rebuilt during Docker build)
+priv/static/assets/
+priv/static/cache_manifest.json
+
+# Docs
+docs/
+PROGRESS.md
+README.md
+CLAUDE.md
+LICENSE
