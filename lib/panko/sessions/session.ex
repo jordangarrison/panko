@@ -1,11 +1,20 @@
 defmodule Panko.Sessions.Session do
   use Ash.Resource,
     domain: Panko.Sessions,
-    data_layer: AshPostgres.DataLayer
+    data_layer: AshPostgres.DataLayer,
+    notifiers: [Ash.Notifier.PubSub]
 
   postgres do
     table "sessions"
     repo Panko.Repo
+  end
+
+  pub_sub do
+    module PankoWeb.Endpoint
+    prefix "sessions"
+    publish :upsert_from_import, ["imported"]
+    publish_all :update, ["updated", :id]
+    publish_all :destroy, ["destroyed", :id]
   end
 
   attributes do
