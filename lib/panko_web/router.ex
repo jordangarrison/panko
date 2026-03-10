@@ -17,7 +17,10 @@ defmodule PankoWeb.Router do
   scope "/", PankoWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live_session :default, layout: {PankoWeb.Layouts, :app} do
+      live "/", SessionsLive, :index
+      live "/sessions/:id", SessionLive, :show
+    end
   end
 
   # Other scopes may use custom stacks.

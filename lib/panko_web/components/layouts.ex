@@ -16,7 +16,8 @@ defmodule PankoWeb.Layouts do
 
   This function is typically invoked from every template,
   and it often contains your application menu, sidebar,
-  or similar.
+  or similar. When used as a LiveView layout, the content
+  is passed via `@inner_content` instead of `@inner_block`.
 
   ## Examples
 
@@ -31,7 +32,7 @@ defmodule PankoWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
 
-  slot :inner_block, required: true
+  slot :inner_block
 
   def app(assigns) do
     ~H"""
@@ -64,7 +65,7 @@ defmodule PankoWeb.Layouts do
 
     <main class="px-4 py-20 sm:px-6 lg:px-8">
       <div class="mx-auto max-w-2xl space-y-4">
-        {render_slot(@inner_block)}
+        {render_slot(@inner_block) || @inner_content}
       </div>
     </main>
 
