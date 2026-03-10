@@ -71,6 +71,7 @@ defmodule Panko.MixProject do
       {:file_system, "~> 1.0"},
 
       # Dev tools
+      {:tidewave, "~> 0.5", only: :dev},
       {:esbuild, "~> 0.9", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:sourceror, "~> 1.7", only: [:dev, :test]},
