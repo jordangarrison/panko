@@ -13,7 +13,13 @@ defmodule PankoWeb.SessionsLive do
 
     sessions = load_sessions()
     shared_session_ids = load_shared_session_ids()
-    {:ok, assign(socket, sessions: sessions, shared_session_ids: shared_session_ids, page_title: "Sessions")}
+
+    {:ok,
+     assign(socket,
+       sessions: sessions,
+       shared_session_ids: shared_session_ids,
+       page_title: "Sessions"
+     )}
   end
 
   @impl true

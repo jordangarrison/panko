@@ -23,6 +23,14 @@ defmodule PankoWeb.Router do
     end
   end
 
+  scope "/s", PankoWeb do
+    pipe_through :browser
+
+    live_session :public do
+      live "/:slug", ShareLive, :show
+    end
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", PankoWeb do
   #   pipe_through :api

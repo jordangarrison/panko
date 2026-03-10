@@ -90,9 +90,9 @@ defmodule Panko.Sharing.Share do
       filter expr(is_shared == true)
 
       prepare build(
-        sort: [shared_at: :desc],
-        load: [:session]
-      )
+                sort: [shared_at: :desc],
+                load: [:session]
+              )
     end
   end
 end
