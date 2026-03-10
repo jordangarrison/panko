@@ -1,0 +1,217 @@
+# Ash Framework 3.x Development Rules
+
+These rules apply when working with Ash resources, domains, and related patterns
+in the Panko project.
+
+## Resource Definition
+
+Resources use `Ash.Resource` with `domain:` and `data_layer:` options:
+
+```elixir
+defmodule Panko.Sessions.Session do
+  use Ash.Resource,
+    domain: Panko.Sessions,
+    data_layer: AshPostgres.DataLayer,
+    notifiers: [Ash.Notifier.PubSub]
+end
+```
+
+- Always specify `domain:` — every resource belongs to exactly one domain.
+- Use `AshPostgres.DataLayer` for persisted resources.
+- Add `notifiers: [Ash.Notifier.PubSub]` when real-time updates are needed.
+
+## Attributes
+
+- Use `uuid_primary_key :id` for primary keys.
+- Set `public? true` on attributes that should be exposed.
+- Set `allow_nil? false` for required fields.
+- Use `timestamps()` for `inserted_at`/`updated_at`.
+- `constraints max_length: nil` is NOT valid in Ash 3.x. To allow unlimited-length
+  strings, simply omit the `constraints` option entirely.
+- Use Ash enum types (via `use Ash.Type.Enum`) for enumerated values.
+
+## Actions
+
+### Default actions
+```elixir
+actions do
+  defaults [:read, :destroy]
+end
+```
+
+### Create / Update actions
+- List accepted attributes with `accept [...]`.
+- Use `change set_attribute(...)` for computed values.
+- Use `change manage_relationship(:arg, :rel, type: :direct_control)` to manage
+  related records inline.
+
+### Custom actions
+```elixir
+action :import_from_file, :struct do
+  constraints instance_of: __MODULE__
+  argument :file_path, :string, allow_nil?: false
+
+  run fn input, _context ->
+    # implementation
+  end
+end
+```
+
+### Read actions
+- Use `prepare build(sort: [...], limit: N)` for default sorting/limiting.
+- Use `filter expr(...)` for default filters.
+- Use `get? true` on read actions that return a single record.
+
+## Identities
+
+Define unique constraints with identities:
+```elixir
+identities do
+  identity :unique_name, [:field1, :field2]
+end
+```
+
+## Relationships
+
+- `has_many`, `belongs_to`, `has_one` — standard relationship types.
+- Use `sort` option on `has_many` for default ordering.
+- Cross-domain relationships need `domain` option on `belongs_to`:
+  ```elixir
+  belongs_to :session, Panko.Sessions.Session do
+    domain Panko.Sessions
+  end
+  ```
+
+## Domain (Code Interface)
+
+Domains use `Ash.Domain` and define the public API via code interfaces:
+
+```elixir
+defmodule Panko.Sessions do
+  use Ash.Domain
+
+  resources do
+    resource Panko.Sessions.Session do
+      define :import_from_file, action: :import_from_file, args: [:file_path]
+      define :get_session, action: :read, get_by: [:id]
+      define :list_sessions, action: :list_recent
+    end
+  end
+end
+```
+
+- Always call domain functions (e.g., `Panko.Sessions.list_sessions()`) from
+  outside the domain. Do not call `Ash.read!/1` directly in LiveViews or
+  controllers — use the code interface instead.
+
+## Changesets and Queries
+
+### Creating records
+```elixir
+Resource
+|> Ash.Changeset.for_create(:action_name, params)
+|> Ash.create()
+```
+
+### Reading records
+```elixir
+Ash.read!(Resource)
+Ash.get!(Resource, id)
+```
+
+### Loading relationships
+```elixir
+Ash.load!(record, [:blocks, :sub_agents])
+```
+
+### Filtering
+Prefer keyword filter syntax to avoid pin-operator issues with AI-generated code:
+```elixir
+# GOOD — keyword syntax
+Ash.Query.filter(Resource, field: value)
+
+# AVOID — expression syntax with pin operator (easy to get wrong)
+Ash.Query.filter(Resource, field == ^value)
+```
+
+## Upserts
+
+For idempotent create-or-update operations:
+```elixir
+create :upsert_from_import do
+  upsert? true
+  upsert_identity :identity_name
+  upsert_fields [:field1, :field2]
+end
+```
+
+## PubSub Notifiers
+
+Add real-time notifications on resources:
+```elixir
+pub_sub do
+  module PankoWeb.Endpoint
+  prefix "topic_prefix"
+  publish :action_name, ["event_name"]
+  publish_all :update, ["updated", :id]
+end
+```
+
+Subscribe in LiveView:
+```elixir
+PankoWeb.Endpoint.subscribe("topic_prefix:event_name")
+```
+
+## Aggregates
+
+Define computed aggregate values on resources:
+```elixir
+aggregates do
+  count :block_count, :blocks
+  count :tool_call_count, :blocks do
+    filter expr(block_type == :tool_call)
+  end
+  first :last_activity_at, :blocks, :timestamp do
+    sort timestamp: :desc
+  end
+end
+```
+
+## Migrations
+
+- Generate migrations: `mix ash.codegen <description>`
+- Run migrations: `mix ash.migrate`
+- For test environment: `MIX_ENV=test mix ash.migrate`
+- Always run migrations after schema changes.
+- Destroy + recreate migrations during early development if needed.
+
+## Changes (Custom)
+
+Custom changes live in the resource's namespace:
+```elixir
+defmodule Panko.Sharing.Changes.GenerateSlug do
+  use Ash.Resource.Change
+
+  @impl true
+  def change(changeset, _opts, _context) do
+    # modify and return changeset
+  end
+end
+```
+
+## Ash Phoenix Integration
+
+- Use `AshPhoenix.Form` for building forms backed by Ash actions.
+- In LiveViews, prefer domain code interface functions over raw Ash calls.
+- Load data in `mount/3` or `handle_params/3` using domain functions.
+
+## Common Pitfalls
+
+1. **Missing `domain:` option** — Every resource MUST specify its domain.
+2. **Using `constraints max_length: nil`** — Not valid in Ash 3.x; omit constraints.
+3. **Pin operator in filters** — Use keyword syntax `filter(field: value)` when possible.
+4. **Forgetting `public? true`** — Attributes and relationships are private by default.
+5. **Cross-domain relationships** — Must specify `domain` on the `belongs_to`.
+6. **Not running migrations** — After any resource schema change, run `mix ash.codegen`
+   then `mix ash.migrate`.
+7. **Calling Ash directly in LiveViews** — Use domain code interface functions.
