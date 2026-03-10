@@ -16,6 +16,9 @@ config :panko, PankoWeb.Endpoint,
 
 config :panko, Oban, testing: :manual
 
+# Don't start SessionWatcher in tests — tests start their own instances
+config :panko, start_session_watcher: false
+
 config :logger, level: :warning
 
 config :phoenix, :plug_init_mode, :runtime
