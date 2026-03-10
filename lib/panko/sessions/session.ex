@@ -59,6 +59,10 @@ defmodule Panko.Sessions.Session do
       sort position: :asc
       public? true
     end
+
+    has_many :sub_agents, Panko.Sessions.SubAgent do
+      public? true
+    end
   end
 
   aggregates do

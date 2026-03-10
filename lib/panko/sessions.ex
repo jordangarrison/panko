@@ -4,5 +4,6 @@ defmodule Panko.Sessions do
   resources do
     resource Panko.Sessions.Session
     resource Panko.Sessions.Block
+    resource Panko.Sessions.SubAgent
   end
 end
