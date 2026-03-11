@@ -157,5 +157,9 @@ defmodule Panko.Sessions.Session do
     read :list_recent do
       prepare build(sort: [started_at: :desc], limit: 50)
     end
+
+    read :list_projects do
+      prepare build(sort: [started_at: :desc])
+    end
   end
 end

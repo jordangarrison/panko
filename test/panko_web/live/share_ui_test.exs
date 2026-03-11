@@ -74,8 +74,14 @@ defmodule PankoWeb.ShareUITest do
     test "shows Shared badge for shared sessions", %{conn: conn, session: session} do
       {:ok, _share} = Panko.Sharing.create_share(session.id)
 
-      {:ok, _view, html} = live(conn, ~p"/")
-      assert html =~ "Shared"
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      # Expand the project accordion to reveal session badges
+      view
+      |> element("button[phx-value-project=\"/home/user/my-project\"]")
+      |> render_click()
+
+      assert render(view) =~ "Shared"
     end
 
     test "does not show Shared badge for unshared sessions", %{conn: conn} do

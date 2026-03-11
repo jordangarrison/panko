@@ -12,7 +12,11 @@ defmodule PankoWeb.SessionsLiveTest do
     path = Path.join(["test/fixtures", "simple_session.jsonl"])
     {:ok, _session} = Panko.Sessions.import_from_file(path)
 
-    {:ok, _view, html} = live(conn, ~p"/")
-    assert html =~ "List the files"
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    # Expand the project accordion to reveal session titles
+    view |> element("button[phx-value-project=\"/home/user/my-project\"]") |> render_click()
+
+    assert render(view) =~ "List the files"
   end
 end
