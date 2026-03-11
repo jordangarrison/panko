@@ -21,7 +21,7 @@ defmodule PankoWeb.SessionLiveTest do
 
   test "shows back link", %{conn: conn, session: session} do
     {:ok, _view, html} = live(conn, ~p"/sessions/#{session.id}")
-    assert html =~ "Back"
+    assert html =~ "Sessions"
   end
 
   test "shows session metadata", %{conn: conn, session: session} do
