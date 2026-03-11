@@ -13,6 +13,24 @@ defmodule PankoWeb.Components.ContentRenderer do
   - `<system-reminder>...</system-reminder>` - stripped entirely
   """
 
+  # Compile the combined split pattern once at compile time.
+  # Individual tag_patterns/0 must remain a function because Regex structs
+  # contain references that cannot be escaped into function bodies via @attrs.
+  @combined_pattern Regex.compile!(
+                      [
+                        ~r/<system-reminder>.*?<\/system-reminder>/s,
+                        ~r/<command-name>(.*?)<\/command-name>/s,
+                        ~r/<command-message>(.*?)<\/command-message>/s,
+                        ~r/<command-args>(.*?)<\/command-args>/s,
+                        ~r/<local-command-stdout>(.*?)<\/local-command-stdout>/s,
+                        ~r/<local-command-caveat>(.*?)<\/local-command-caveat>/s,
+                        ~r/<command>(.*?)<\/command>/s
+                      ]
+                      |> Enum.map(& &1.source)
+                      |> Enum.join("|"),
+                      "s"
+                    )
+
   @doc """
   Parses content string into a list of tagged segments.
 
@@ -31,7 +49,7 @@ defmodule PankoWeb.Components.ContentRenderer do
   def parse_content(""), do: []
 
   def parse_content(content) when is_binary(content) do
-    combined_pattern()
+    @combined_pattern
     |> Regex.split(content, include_captures: true)
     |> Enum.flat_map(&classify_segment/1)
     |> Enum.reject(fn
@@ -47,9 +65,10 @@ defmodule PankoWeb.Components.ContentRenderer do
   """
   @spec render_markdown(String.t()) :: Phoenix.HTML.safe()
   def render_markdown(text) when is_binary(text) do
-    text
-    |> Earmark.as_html!(compact_output: true)
-    |> Phoenix.HTML.raw()
+    case Earmark.as_html(text, compact_output: true) do
+      {:ok, html, _warnings} -> Phoenix.HTML.raw(html)
+      {:error, _html, _errors} -> Phoenix.HTML.raw("<p>#{Phoenix.HTML.html_escape(text)}</p>")
+    end
   end
 
   def render_markdown(_), do: Phoenix.HTML.raw("")
@@ -57,7 +76,8 @@ defmodule PankoWeb.Components.ContentRenderer do
   # -- Private helpers --
 
   # Tag patterns ordered so more specific tags match before shorter ones.
-  # {regex, atom_type} where :strip means discard entirely.
+  # Must be a function (not @attr) because Regex structs contain references
+  # that the compiler cannot escape into function bodies.
   defp tag_patterns do
     [
       {~r/<system-reminder>.*?<\/system-reminder>/s, :strip},
@@ -68,13 +88,6 @@ defmodule PankoWeb.Components.ContentRenderer do
       {~r/<local-command-caveat>(.*?)<\/local-command-caveat>/s, :command_caveat},
       {~r/<command>(.*?)<\/command>/s, :command}
     ]
-  end
-
-  defp combined_pattern do
-    tag_patterns()
-    |> Enum.map(fn {regex, _type} -> regex.source end)
-    |> Enum.join("|")
-    |> Regex.compile!("s")
   end
 
   defp classify_segment(""), do: []
