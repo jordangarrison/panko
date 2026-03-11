@@ -71,6 +71,9 @@ defmodule Panko.MixProject do
       # File watching
       {:file_system, "~> 1.0"},
 
+      # Markdown rendering
+      {:earmark, "~> 1.4"},
+
       # Dev tools
       {:tidewave, "~> 0.5", only: :dev},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
