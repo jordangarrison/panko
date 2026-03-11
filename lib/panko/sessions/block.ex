@@ -6,10 +6,6 @@ defmodule Panko.Sessions.Block do
   postgres do
     table "blocks"
     repo Panko.Repo
-
-    custom_indexes do
-      index [:session_id, :position], unique: true
-    end
   end
 
   attributes do

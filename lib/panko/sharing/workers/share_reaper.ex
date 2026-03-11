@@ -17,11 +17,8 @@ defmodule Panko.Sharing.Workers.ShareReaper do
 
     expired_shares =
       Share
-      |> Ash.Query.filter(is_shared: true)
+      |> Ash.Query.filter(is_shared == true and not is_nil(expires_at) and expires_at < ^now)
       |> Ash.read!()
-      |> Enum.filter(fn share ->
-        share.expires_at != nil and DateTime.compare(share.expires_at, now) == :lt
-      end)
 
     for share <- expired_shares do
       Panko.Sharing.unpublish_share(share)

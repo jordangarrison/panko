@@ -94,5 +94,16 @@ defmodule Panko.Sharing.Share do
                 load: [:session]
               )
     end
+
+    read :for_session do
+      argument :session_id, :uuid, allow_nil?: false
+      filter expr(session_id == ^arg(:session_id))
+      prepare build(sort: [inserted_at: :desc], limit: 1)
+    end
+
+    read :shared_session_ids do
+      filter expr(is_shared == true)
+      prepare build(select: [:session_id])
+    end
   end
 end

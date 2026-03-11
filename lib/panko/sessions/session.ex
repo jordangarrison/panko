@@ -159,7 +159,10 @@ defmodule Panko.Sessions.Session do
     end
 
     read :list_projects do
-      prepare build(sort: [started_at: :desc])
+      prepare build(
+                sort: [started_at: :desc],
+                load: [:block_count, :message_count, :tool_call_count]
+              )
     end
   end
 end

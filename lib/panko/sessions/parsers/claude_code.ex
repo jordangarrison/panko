@@ -21,7 +21,12 @@ defmodule Panko.Sessions.Parsers.ClaudeCode do
         lines =
           content
           |> String.split("\n", trim: true)
-          |> Enum.map(&Jason.decode!/1)
+          |> Enum.flat_map(fn line ->
+            case Jason.decode(line) do
+              {:ok, parsed} -> [parsed]
+              {:error, _} -> []
+            end
+          end)
 
         session_id = extract_session_id(lines)
         project = extract_project(lines)
@@ -79,15 +84,15 @@ defmodule Panko.Sessions.Parsers.ClaudeCode do
   end
 
   defp extract_blocks_and_agents(lines) do
-    {blocks, agents, _pos} =
+    {blocks_rev, agents_rev, _pos} =
       lines
       |> Enum.filter(&(&1["type"] in ["user", "assistant"]))
       |> Enum.reduce({[], [], 0}, fn line, {blocks, agents, pos} ->
         {new_blocks, new_agents, new_pos} = process_line(line, pos)
-        {blocks ++ new_blocks, agents ++ new_agents, new_pos}
+        {Enum.reverse(new_blocks) ++ blocks, Enum.reverse(new_agents) ++ agents, new_pos}
       end)
 
-    {blocks, agents}
+    {Enum.reverse(blocks_rev), Enum.reverse(agents_rev)}
   end
 
   defp process_line(%{"type" => "user", "message" => message} = line, pos) do
@@ -119,7 +124,7 @@ defmodule Panko.Sessions.Parsers.ClaudeCode do
     content_parts = message["content"] || []
     timestamp = parse_timestamp(line["timestamp"])
 
-    {blocks, agents, next_pos} =
+    {blocks_rev, agents_rev, next_pos} =
       Enum.reduce(content_parts, {[], [], pos}, fn part, {blks, agts, p} ->
         case part["type"] do
           "text" ->
@@ -131,11 +136,11 @@ defmodule Panko.Sessions.Parsers.ClaudeCode do
               timestamp: timestamp
             }
 
-            {blks ++ [block], agts, p + 1}
+            {[block | blks], agts, p + 1}
 
           "tool_use" ->
             {tool_block, maybe_agent} = process_tool_use(part, p, timestamp)
-            {blks ++ [tool_block], agts ++ maybe_agent, p + 1}
+            {[tool_block | blks], Enum.reverse(maybe_agent) ++ agts, p + 1}
 
           "thinking" ->
             block = %{
@@ -146,14 +151,14 @@ defmodule Panko.Sessions.Parsers.ClaudeCode do
               timestamp: timestamp
             }
 
-            {blks ++ [block], agts, p + 1}
+            {[block | blks], agts, p + 1}
 
           _ ->
             {blks, agts, p}
         end
       end)
 
-    {blocks, agents, next_pos}
+    {Enum.reverse(blocks_rev), Enum.reverse(agents_rev), next_pos}
   end
 
   defp process_line(_line, pos), do: {[], [], pos}

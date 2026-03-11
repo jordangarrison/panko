@@ -7,10 +7,7 @@ defmodule PankoWeb.Components.ShareModal do
   """
   use PankoWeb, :live_component
 
-  require Ash.Query
-
   alias Panko.Sharing
-  alias Panko.Sharing.Share
 
   @impl true
   def update(assigns, socket) do
@@ -132,6 +129,7 @@ defmodule PankoWeb.Components.ShareModal do
     end
   end
 
+  @impl true
   def handle_event("unpublish_share", _params, socket) do
     case Sharing.unpublish_share(socket.assigns.share) do
       {:ok, share} ->
@@ -142,6 +140,7 @@ defmodule PankoWeb.Components.ShareModal do
     end
   end
 
+  @impl true
   def handle_event("republish_share", _params, socket) do
     case Sharing.republish_share(socket.assigns.share) do
       {:ok, share} ->
@@ -152,16 +151,13 @@ defmodule PankoWeb.Components.ShareModal do
     end
   end
 
+  @impl true
   def handle_event("mark_copied", _params, socket) do
     {:noreply, assign(socket, copied: true)}
   end
 
   defp find_share(session_id) do
-    Share
-    |> Ash.Query.filter(session_id: session_id)
-    |> Ash.Query.sort(inserted_at: :desc)
-    |> Ash.Query.limit(1)
-    |> Ash.read!()
+    Sharing.find_share_for_session!(session_id)
     |> List.first()
   end
 

@@ -73,6 +73,7 @@ defmodule Panko.MixProject do
 
       # Markdown rendering
       {:earmark, "~> 1.4"},
+      {:html_sanitize_ex, "~> 1.4"},
 
       # Dev tools
       {:tidewave, "~> 0.5", only: :dev},

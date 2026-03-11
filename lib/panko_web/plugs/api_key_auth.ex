@@ -27,7 +27,7 @@ defmodule PankoWeb.Plugs.ApiKeyAuth do
         conn.query_params["api_key"] ||
         get_session_key(conn)
 
-    if provided == expected_key do
+    if provided != nil and Plug.Crypto.secure_compare(provided, expected_key) do
       conn
     else
       conn

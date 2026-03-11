@@ -66,8 +66,12 @@ defmodule PankoWeb.Components.ContentRenderer do
   @spec render_markdown(String.t()) :: Phoenix.HTML.safe()
   def render_markdown(text) when is_binary(text) do
     case Earmark.as_html(text, compact_output: true) do
-      {:ok, html, _warnings} -> Phoenix.HTML.raw(html)
-      {:error, _html, _errors} -> Phoenix.HTML.raw("<p>#{Phoenix.HTML.html_escape(text)}</p>")
+      {:ok, html, _warnings} ->
+        Phoenix.HTML.raw(HtmlSanitizeEx.markdown_html(html))
+
+      {:error, _html, _errors} ->
+        escaped = text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+        Phoenix.HTML.raw("<p>#{escaped}</p>")
     end
   end
 

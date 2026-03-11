@@ -1,9 +1,8 @@
 defmodule PankoWeb.SessionsLive do
   use PankoWeb, :live_view
 
-  require Ash.Query
-
-  alias Panko.Sessions.Session
+  alias Panko.Sessions
+  alias Panko.Sharing
 
   @impl true
   def mount(_params, _session, socket) do
@@ -20,6 +19,7 @@ defmodule PankoWeb.SessionsLive do
        sessions: sessions,
        shared_session_ids: shared_session_ids,
        projects: projects,
+       project_count: map_size(projects),
        search_query: "",
        expanded_projects: MapSet.new(),
        page_title: "Sessions"
@@ -38,7 +38,8 @@ defmodule PankoWeb.SessionsLive do
         projects
       end
 
-    {:noreply, assign(socket, sessions: sessions, projects: projects)}
+    {:noreply,
+     assign(socket, sessions: sessions, projects: projects, project_count: map_size(projects))}
   end
 
   @impl true
@@ -58,6 +59,7 @@ defmodule PankoWeb.SessionsLive do
      assign(socket, search_query: query, projects: filtered, expanded_projects: expanded)}
   end
 
+  @impl true
   def handle_event("toggle_project", %{"project" => project}, socket) do
     expanded =
       if MapSet.member?(socket.assigns.expanded_projects, project) do
@@ -76,7 +78,7 @@ defmodule PankoWeb.SessionsLive do
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-3xl font-bold">Sessions</h1>
         <div class="text-sm text-base-content/50">
-          {length(@sessions)} sessions across {map_size(group_by_project(@sessions))} projects
+          {length(@sessions)} sessions across {@project_count} projects
         </div>
       </div>
 
@@ -191,17 +193,11 @@ defmodule PankoWeb.SessionsLive do
   end
 
   defp load_sessions do
-    Session
-    |> Ash.Query.sort(started_at: :desc)
-    |> Ash.Query.load([:block_count, :message_count, :tool_call_count])
-    |> Ash.read!()
+    Sessions.list_all_sessions!()
   end
 
   defp load_shared_session_ids do
-    Panko.Sharing.Share
-    |> Ash.Query.filter(is_shared == true)
-    |> Ash.Query.select([:session_id])
-    |> Ash.read!()
+    Sharing.list_shared_session_ids!()
     |> Enum.map(& &1.session_id)
     |> MapSet.new()
   end

@@ -16,9 +16,8 @@ services:
       - db
     environment:
       DATABASE_URL: ecto://postgres:postgres@db/panko_dev
-      # IMPORTANT: Replace this with a real secret in production!
-      # Generate one with: mix phx.gen.secret
-      SECRET_KEY_BASE: c3320bd6cf3a7e336dbf7564d67701475b35a34045b232c2c1b99b825f8ac65961cc789829742dd7b8003f7fd811b90b23468039417072fb75dcba31adc5e58a
+      # REQUIRED: Generate a secret with `mix phx.gen.secret` and set it here
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Set SECRET_KEY_BASE with: mix phx.gen.secret}
       PHX_HOST: localhost
       PHX_SERVER: "true"
       PORT: "4000"

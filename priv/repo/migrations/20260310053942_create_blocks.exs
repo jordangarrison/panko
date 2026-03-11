@@ -33,8 +33,6 @@ defmodule Panko.Repo.Migrations.CreateBlocks do
       )
     end
 
-    create(index(:blocks, [:session_id, :position], unique: true))
-
     create(unique_index(:blocks, [:session_id, :position], name: "blocks_session_position_index"))
   end
 
@@ -44,8 +42,6 @@ defmodule Panko.Repo.Migrations.CreateBlocks do
     )
 
     drop(constraint(:blocks, "blocks_session_id_fkey"))
-
-    drop_if_exists(index(:blocks, [:session_id, :position]))
 
     drop(table(:blocks))
   end

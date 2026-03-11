@@ -125,5 +125,18 @@ defmodule PankoWeb.Components.ContentRendererTest do
       html = Phoenix.HTML.safe_to_string(result)
       assert html =~ "<code"
     end
+
+    test "sanitizes script tags from markdown" do
+      result = ContentRenderer.render_markdown("<script>alert('xss')</script>")
+      html = Phoenix.HTML.safe_to_string(result)
+      refute html =~ "<script"
+      refute html =~ "</script>"
+    end
+
+    test "sanitizes onerror attributes from markdown" do
+      result = ContentRenderer.render_markdown(~S[<img src=x onerror="alert('xss')">])
+      html = Phoenix.HTML.safe_to_string(result)
+      refute html =~ "onerror"
+    end
   end
 end

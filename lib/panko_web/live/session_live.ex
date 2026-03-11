@@ -7,9 +7,10 @@ defmodule PankoWeb.SessionLive do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Panko.Sessions.get_session(id) do
+    case Panko.Sessions.get_session(id,
+           load: [:blocks, :sub_agents, :block_count, :message_count]
+         ) do
       {:ok, session} ->
-        session = Ash.load!(session, [:blocks, :sub_agents, :block_count, :message_count])
         uri = get_connect_info_uri(socket)
 
         {:ok,

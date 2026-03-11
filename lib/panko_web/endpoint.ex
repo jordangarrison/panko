@@ -27,7 +27,7 @@ defmodule PankoWeb.Endpoint do
     only: PankoWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
-  if Code.ensure_loaded?(Tidewave) do
+  if Code.ensure_loaded?(Tidewave) and Mix.env() == :dev do
     plug Tidewave
   end
 
