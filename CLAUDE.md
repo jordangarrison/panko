@@ -109,11 +109,55 @@ When working on this project:
    - [ ] Tests written: Unit tests for new functionality
    - [ ] Tests pass: `mix test` passes
    - [ ] Format: `mix format --check-formatted` passes
+   - [ ] Runtime verification: Use Tidewave MCP tools (see Feedback Loop below)
    - [ ] Integration test: Manual or automated verification the feature works end-to-end
 8. **Mark Complete**: Update prd.json setting `passes: true` for completed story
 9. **Update Progress**: Log work in PROGRESS.md with date, summary, and validation results
 10. **Commit**: Create a commit for the completed story
 11. **Stop**: Do NOT proceed to next story - let user trigger next iteration
+
+### Feedback Loop
+
+After every change, run these steps in order:
+1. `mix compile --warnings-as-errors` — fix all errors before proceeding
+2. `mix format --check-formatted` — fix formatting
+3. `mix test` for affected modules
+4. Use Tidewave MCP to verify runtime behaviour (see below)
+
+If checks fail, self-correct and retry. After 5 failed attempts on the
+same issue, stop and summarise what was tried, then hand back to the human.
+
+### Tidewave MCP Verification
+
+The dev server exposes Tidewave at `http://localhost:4001/tidewave/mcp`.
+Use these tools after implementing features to verify correctness at runtime:
+
+- **`get_ash_resources`** — Verify domains and resources are registered correctly
+  after adding/modifying Ash resources
+- **`project_eval`** — Run code in the live application to verify behaviour:
+  ```elixir
+  # Verify a domain function works
+  Panko.Sessions.list_sessions()
+
+  # Check a resource's attributes/actions
+  Ash.Resource.Info.attributes(Panko.Sessions.Session)
+  Ash.Resource.Info.actions(Panko.Sessions.Block)
+
+  # Verify relationships loaded correctly
+  session = Panko.Sessions.get_session!(id)
+  Ash.load!(session, [:blocks, :sub_agents])
+  ```
+- **`get_logs`** — Read server logs after triggering an action to check for
+  errors or unexpected behaviour
+- **`execute_sql_query`** — Verify database state after mutations:
+  ```sql
+  SELECT count(*) FROM sessions;
+  SELECT * FROM shares WHERE expires_at < now();
+  ```
+- **`search_package_docs`** — Look up Ash/Phoenix API docs filtered to exact
+  dependency versions when unsure about usage
+- **`get_docs`** — Get documentation for a specific module/function from the
+  project's exact dependency versions
 
 ### Validation Checklist
 
@@ -125,9 +169,11 @@ mix test                           # All tests must pass
 mix format --check-formatted       # Properly formatted
 ```
 
-For stories with user-facing features, also run:
+For stories with user-facing features, also verify via Tidewave:
 ```
-mix phx.server   # Start server and verify manually
+# Use get_ash_resources to confirm resource registration
+# Use project_eval to call domain functions and verify results
+# Use get_logs to check for runtime errors
 ```
 
 Write tests in `test/` directory mirroring `lib/` structure.
