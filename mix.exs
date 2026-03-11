@@ -11,7 +11,8 @@ defmodule Panko.MixProject do
       aliases: aliases(),
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
-      listeners: [Phoenix.CodeReloader]
+      listeners: [Phoenix.CodeReloader],
+      usage_rules: usage_rules()
     ]
   end
 
@@ -72,6 +73,7 @@ defmodule Panko.MixProject do
 
       # Dev tools
       {:tidewave, "~> 0.5", only: :dev},
+      {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:esbuild, "~> 0.9", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:sourceror, "~> 1.7", only: [:dev, :test]},
@@ -85,6 +87,26 @@ defmodule Panko.MixProject do
   #     $ mix setup
   #
   # See the documentation for `Mix` for more info on aliases.
+  defp usage_rules do
+    [
+      file: "CLAUDE.md",
+      usage_rules: [
+        :elixir,
+        :otp,
+        :phoenix
+      ],
+      skills: [
+        location: ".claude/skills",
+        build: [
+          "ash-framework": [
+            description: "Use when making any domain, resource, or Ash-related changes.",
+            usage_rules: [:ash, ~r/^ash_/]
+          ]
+        ]
+      ]
+    ]
+  end
+
   defp aliases do
     [
       setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
