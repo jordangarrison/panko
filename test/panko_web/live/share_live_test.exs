@@ -28,7 +28,9 @@ defmodule PankoWeb.ShareLiveTest do
 
   test "shows session project", %{conn: conn, share: share, session: session} do
     {:ok, _view, html} = live(conn, ~p"/s/#{share.slug}")
-    assert html =~ session.project
+    # display_project shortens /home/user/... to ~/...
+    displayed = session.project |> String.replace(~r"^/home/[^/]+/", "~/")
+    assert html =~ displayed
   end
 
   test "shows footer with Panko link", %{conn: conn, share: share} do

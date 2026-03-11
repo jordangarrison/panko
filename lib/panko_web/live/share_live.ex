@@ -51,8 +51,8 @@ defmodule PankoWeb.ShareLive do
   def render(assigns) do
     ~H"""
     <div class="container mx-auto px-4 py-8 max-w-4xl">
-      <h1 class="text-2xl font-bold mb-2">{@session.title || "Shared Session"}</h1>
-      <p class="text-sm text-base-content/60 mb-6">{@session.project}</p>
+      <h1 class="text-2xl font-bold mb-1">{@session.title || "Shared Session"}</h1>
+      <p class="text-sm text-base-content/60 mb-6 font-mono">{display_project(@session.project)}</p>
 
       <div class="space-y-2">
         <.block :for={blk <- @session.blocks} block={blk} />
@@ -63,6 +63,14 @@ defmodule PankoWeb.ShareLive do
       </footer>
     </div>
     """
+  end
+
+  defp display_project(nil), do: ""
+
+  defp display_project(project) do
+    project
+    |> String.replace(~r"^/home/[^/]+/", "~/")
+    |> String.replace(~r"^/Users/[^/]+/", "~/")
   end
 
   defp expired?(%{expires_at: nil}), do: false
