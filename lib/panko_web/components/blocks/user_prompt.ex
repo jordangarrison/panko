@@ -3,14 +3,17 @@ defmodule PankoWeb.Components.Blocks.UserPrompt do
 
   def render(assigns) do
     ~H"""
-    <div class="chat chat-end mb-4">
-      <div class="chat-bubble chat-bubble-primary whitespace-pre-wrap">
+    <article class="block border border-base-300 rounded-lg mb-4 border-l-4 border-l-info overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-2 bg-base-200/50 border-b border-base-300">
+        <span class="text-sm font-semibold text-info">User</span>
+        <time :if={@block.timestamp} class="text-xs text-base-content/50">
+          {format_time(@block.timestamp)}
+        </time>
+      </div>
+      <div class="px-4 py-3 whitespace-pre-wrap">
         {@block.content}
       </div>
-      <div class="chat-footer text-xs opacity-50">
-        {format_time(@block.timestamp)}
-      </div>
-    </div>
+    </article>
     """
   end
 

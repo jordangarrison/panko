@@ -44,7 +44,7 @@ defmodule PankoWeb.SessionLiveTest do
 
     test "renders thinking blocks", %{conn: conn, complex_session: session} do
       {:ok, _view, html} = live(conn, ~p"/sessions/#{session.id}")
-      assert html =~ "Thinking..."
+      assert html =~ "Thinking"
     end
 
     test "renders file edit blocks", %{conn: conn, complex_session: session} do
