@@ -11,6 +11,7 @@ defmodule Panko.Application do
       [
         PankoWeb.Telemetry,
         Panko.Repo,
+        {AshAuthentication.Supervisor, otp_app: :panko},
         {DNSCluster, query: Application.get_env(:panko, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Panko.PubSub},
         {Oban, Application.fetch_env!(:panko, Oban)},
