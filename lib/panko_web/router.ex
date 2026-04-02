@@ -1,5 +1,6 @@
 defmodule PankoWeb.Router do
   use PankoWeb, :router
+  use AshAuthentication.Phoenix.Router
 
   pipeline :browser do
     plug :accepts, ["html"]
@@ -8,25 +9,36 @@ defmodule PankoWeb.Router do
     plug :put_root_layout, html: {PankoWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug :load_from_session
   end
 
   pipeline :api do
     plug :accepts, ["json"]
   end
 
-  pipeline :maybe_require_api_key do
-    plug PankoWeb.Plugs.ApiKeyAuth
+  # Public auth routes (sign in, register, sign out, auth callbacks)
+  scope "/", PankoWeb do
+    pipe_through :browser
+
+    sign_in_route(register_path: "/register", auth_routes_prefix: "/auth")
+    sign_out_route AuthController
+    auth_routes AuthController, Panko.Accounts.User, path: "/auth"
   end
 
+  # Protected routes -- require authenticated user
   scope "/", PankoWeb do
-    pipe_through [:browser, :maybe_require_api_key]
+    pipe_through :browser
 
-    live_session :default, layout: {PankoWeb.Layouts, :app} do
+    ash_authentication_live_session :authenticated,
+      otp_app: :panko,
+      on_mount_prepend: [{PankoWeb.LiveUserAuth, :live_user_required}],
+      layout: {PankoWeb.Layouts, :app} do
       live "/", SessionsLive, :index
       live "/sessions/:id", SessionLive, :show
     end
   end
 
+  # Public share routes -- no auth
   scope "/s", PankoWeb do
     pipe_through :browser
 
@@ -34,9 +46,4 @@ defmodule PankoWeb.Router do
       live "/:slug", ShareLive, :show
     end
   end
-
-  # Other scopes may use custom stacks.
-  # scope "/api", PankoWeb do
-  #   pipe_through :api
-  # end
 end
