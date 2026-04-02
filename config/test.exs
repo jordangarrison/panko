@@ -28,3 +28,6 @@ config :phoenix_live_view,
 
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Ash Authentication
+config :panko, :token_signing_secret, "test-only-secret-must-be-at-least-32-bytes-long!"

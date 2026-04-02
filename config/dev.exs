@@ -87,3 +87,7 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
+
+# Ash Authentication
+config :panko, :token_signing_secret, "dev-only-secret-must-be-at-least-32-bytes-long!!"
+config :ash_authentication, debug_authentication_failures?: true

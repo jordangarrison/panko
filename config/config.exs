@@ -11,7 +11,7 @@ config :panko,
   generators: [timestamp_type: :utc_datetime]
 
 # Ash domains
-config :panko, ash_domains: [Panko.Sessions, Panko.Sharing]
+config :panko, ash_domains: [Panko.Sessions, Panko.Sharing, Panko.Accounts]
 
 # Repo
 config :panko, ecto_repos: [Panko.Repo]
