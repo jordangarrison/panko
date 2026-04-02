@@ -36,7 +36,8 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
-  config :panko, :token_signing_secret,
-    System.get_env("PANKO_TOKEN_SIGNING_SECRET") ||
-      raise "PANKO_TOKEN_SIGNING_SECRET env var is required in production"
+  config :panko,
+         :token_signing_secret,
+         System.get_env("PANKO_TOKEN_SIGNING_SECRET") ||
+           raise("PANKO_TOKEN_SIGNING_SECRET env var is required in production")
 end

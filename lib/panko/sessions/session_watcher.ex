@@ -37,11 +37,25 @@ defmodule Panko.Sessions.SessionWatcher do
 
   @impl true
   def handle_info(:initial_scan, state) do
-    Logger.info("SessionWatcher: scanning #{length(state.watch_paths)} paths")
+    files = Enum.flat_map(state.watch_paths, &find_jsonl_files/1)
 
-    state.watch_paths
-    |> Enum.flat_map(&find_jsonl_files/1)
-    |> Enum.each(&import_file/1)
+    Logger.info(
+      "SessionWatcher: importing #{length(files)} files from #{length(state.watch_paths)} paths"
+    )
+
+    # Run initial scan in a task so the GenServer can still handle messages
+    Task.start(fn ->
+      files
+      |> Task.async_stream(
+        &do_import/1,
+        max_concurrency: 4,
+        timeout: :infinity,
+        ordered: false
+      )
+      |> Stream.run()
+
+      Logger.info("SessionWatcher: initial scan complete")
+    end)
 
     {:noreply, state}
   end
@@ -84,14 +98,16 @@ defmodule Panko.Sessions.SessionWatcher do
   end
 
   defp import_file(path) do
-    Task.start(fn ->
-      case Panko.Sessions.import_from_file(path) do
-        {:ok, session} ->
-          Logger.debug("Imported session #{session.external_id} from #{path}")
+    Task.start(fn -> do_import(path) end)
+  end
 
-        {:error, reason} ->
-          Logger.warning("Failed to import #{path}: #{inspect(reason)}")
-      end
-    end)
+  defp do_import(path) do
+    case Panko.Sessions.import_from_file(path) do
+      {:ok, session} ->
+        Logger.debug("Imported session #{session.external_id} from #{path}")
+
+      {:error, reason} ->
+        Logger.warning("Failed to import #{path}: #{inspect(reason)}")
+    end
   end
 end
