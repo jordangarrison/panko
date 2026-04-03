@@ -3,10 +3,12 @@ defmodule PankoWeb.SessionLiveTest do
 
   import Phoenix.LiveViewTest
 
-  setup do
+  setup %{conn: conn} do
+    user = register_user()
+    conn = log_in_user(conn, user)
     path = Path.join(["test/fixtures", "simple_session.jsonl"])
     {:ok, session} = Panko.Sessions.import_from_file(path)
-    %{session: session}
+    %{conn: conn, user: user, session: session}
   end
 
   test "renders session detail", %{conn: conn, session: session} do

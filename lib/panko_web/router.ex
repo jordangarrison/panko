@@ -31,7 +31,7 @@ defmodule PankoWeb.Router do
 
     ash_authentication_live_session :authenticated,
       otp_app: :panko,
-      on_mount_prepend: [{PankoWeb.LiveUserAuth, :live_user_required}],
+      on_mount: [{PankoWeb.LiveUserAuth, :live_user_required}],
       layout: {PankoWeb.Layouts, :app} do
       live "/", SessionsLive, :index
       live "/sessions/:id", SessionLive, :show

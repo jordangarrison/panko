@@ -3,6 +3,12 @@ defmodule PankoWeb.SessionsLiveTest do
 
   import Phoenix.LiveViewTest
 
+  setup %{conn: conn} do
+    user = register_user()
+    conn = log_in_user(conn, user)
+    %{conn: conn, user: user}
+  end
+
   test "renders empty state when no sessions", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/")
     assert render(view) =~ "No sessions found"
