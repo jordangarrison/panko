@@ -16,6 +16,7 @@
 #               enable = true;
 #               host = "panko.example.com";
 #               secretKeyBaseFile = "/run/secrets/panko-secret-key-base";
+#               tokenSigningSecretFile = "/run/secrets/panko-token-signing-secret";
 #               database.urlFile = "/run/secrets/panko-database-url";
 #               sessionWatchPaths = [ "/home/user/.claude/projects" ];
 #             };
@@ -117,6 +118,17 @@ in
         Absolute path to a file containing the Phoenix SECRET_KEY_BASE.
         Must NOT be a Nix store path.
         Generate with: mix phx.gen.secret or openssl rand -base64 64
+        Consider using sops-nix or agenix for secret management.
+      '';
+    };
+
+    tokenSigningSecretFile = lib.mkOption {
+      type = lib.types.str;
+      description = ''
+        Absolute path to a file containing the PANKO_TOKEN_SIGNING_SECRET.
+        Must NOT be a Nix store path.
+        Used by Ash Authentication for signing session tokens.
+        Generate with: openssl rand -base64 48
         Consider using sops-nix or agenix for secret management.
       '';
     };
@@ -254,6 +266,8 @@ in
         ${lib.optionalString cfg.database.createLocally ''
           export DATABASE_URL="ecto://panko@localhost/panko"
         ''}
+        export PANKO_TOKEN_SIGNING_SECRET="$(< $CREDENTIALS_DIRECTORY/PANKO_TOKEN_SIGNING_SECRET)"
+
         ${lib.optionalString (cfg.apiKeyFile != null) ''
           export PANKO_API_KEY="$(< $CREDENTIALS_DIRECTORY/PANKO_API_KEY)"
         ''}
@@ -274,6 +288,7 @@ in
         LoadCredential =
           [
             "SECRET_KEY_BASE:${cfg.secretKeyBaseFile}"
+            "PANKO_TOKEN_SIGNING_SECRET:${cfg.tokenSigningSecretFile}"
           ]
           ++ lib.optionals (cfg.database.urlFile != null) [
             "DATABASE_URL:${cfg.database.urlFile}"
