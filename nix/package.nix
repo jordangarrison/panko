@@ -26,8 +26,7 @@ let
   mixFodDeps = fetchMixDeps {
     pname = "${pname}-mix-deps";
     inherit version src;
-    # TODO: Compute correct hash by running `nix build` and copying the expected hash
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    hash = "sha256-LL6lNNOKJ2/+OR3/JPSqdJLVgWH3piwzGzG9QwIbuAg=";
   };
 in
 mixRelease {
