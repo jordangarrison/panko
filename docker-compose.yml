@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: panko_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  panko:
+    build: .
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: ecto://postgres:postgres@db/panko_dev
+      # REQUIRED: Generate a secret with `mix phx.gen.secret` and set it here
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Set SECRET_KEY_BASE with: mix phx.gen.secret}
+      PHX_HOST: localhost
+      PHX_SERVER: "true"
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+
+volumes:
+  pgdata:
