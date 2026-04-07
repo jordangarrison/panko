@@ -20,7 +20,10 @@ defmodule PankoWeb.Router do
   scope "/", PankoWeb do
     pipe_through :browser
 
-    sign_in_route(auth_routes_prefix: "/auth")
+    sign_in_route(
+      overrides: [PankoWeb.AuthOverrides, AshAuthentication.Phoenix.Overrides.Default],
+      auth_routes_prefix: "/auth"
+    )
     sign_out_route AuthController
     auth_routes AuthController, Panko.Accounts.User, path: "/auth"
   end

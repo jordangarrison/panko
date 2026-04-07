@@ -23,6 +23,7 @@ defmodule PankoWeb.RegistrationDisabledTest do
     test "sign-in page does not contain a register link", %{conn: conn} do
       conn = get(conn, "/sign-in")
       refute conn.resp_body =~ ~r/href="\/register"/
+      refute conn.resp_body =~ "Need an account?"
     end
   end
 end
