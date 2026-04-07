@@ -2,17 +2,11 @@
 #
 # Panko Elixir/Phoenix package built with mixRelease.
 #
-# STATUS: Scaffolding only — placeholder hashes need to be computed.
-#
-# To make this buildable:
-#   1. Run `nix build` and let the mix deps fetch fail
-#   2. Copy the correct hash from the error message into mixFodDeps.hash
-#   3. Repeat for any other hash mismatches
-#
-# Alternatively, use mix2nix to generate a deps.nix lockfile.
+# Builds the panko Elixir release with esbuild and tailwind asset compilation.
 {
   lib,
   beamPackages,
+  esbuild,
   tailwindcss_4,
   mixRelease ? beamPackages.mixRelease,
   fetchMixDeps ? beamPackages.fetchMixDeps,
@@ -32,7 +26,8 @@ in
 mixRelease {
   inherit pname version src mixFodDeps;
 
-  # Tailwind is configured via MIX_TAILWIND_PATH in config.exs
+  # Asset tools configured via env vars, read by config.exs
+  MIX_ESBUILD_PATH = "${esbuild}/bin/esbuild";
   MIX_TAILWIND_PATH = "${tailwindcss_4}/bin/tailwindcss";
 
   postBuild = ''
