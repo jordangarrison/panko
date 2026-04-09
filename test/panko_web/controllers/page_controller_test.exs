@@ -11,4 +11,11 @@ defmodule PankoWeb.PageControllerTest do
     conn = get(conn, ~p"/")
     assert html_response(conn, 200) =~ "Sessions"
   end
+
+  test "GET / includes favicon link tags", %{conn: conn} do
+    conn = get(conn, ~p"/")
+    html = html_response(conn, 200)
+    assert html =~ ~s|href="/favicon.svg"|
+    assert html =~ ~s|href="/favicon.ico"|
+  end
 end
